@@ -49,6 +49,8 @@
   }
   // [28 Okt] nama 6 slot HANYA dari label manual di halaman Hubungkan; kosong = "Aff N". Tidak pernah dari nama profil WA (nama_wa) atau nomor HP.
   const labelSlot = (n) => String(n.label || '').trim() || 'Aff ' + n.id;
+  // nomor WA akun yang tertaut di slot (bukan nomor kontak); slot yang belum pernah tertaut → kosong
+  const nomorSlot = (n) => n.jid ? nomorHp(n.jid) : '';
   // label pendek "Aff 1" untuk sidebar, inisial dari nama di belakang tanda "-" (mis. "Aff 1 - Natasya" → N)
   const labelPendek = (l) => String(l || '').split(/\s+[-–—]\s+/)[0].slice(0, 10);
   const inisial = (n) => { const l = labelSlot(n), b = l.split(/\s+[-–—]\s+/)[1]; return b ? b.trim()[0].toUpperCase() : 'A' + ((l.match(/\d+/) || [n.id])[0]); };
@@ -65,10 +67,10 @@
   function renderRel() {
     $('#relNomor').innerHTML = `<button class="rel-n ${S.nomorAktif === 'semua' ? 'on' : ''}" data-n="semua" title="Semua nomor"><span class="foto">∑</span><span class="lbl">Semua</span></button>` +
       S.nomor.map(n => { const k = keadaan(n); return `<button class="rel-n ${String(S.nomorAktif) === String(n.id) ? 'on' : ''} ${k === 'terputus' ? 'putus' : ''}" data-n="${n.id}" title="${esc(labelSlot(n))} · ${esc(STATUS[k])}${n.jid ? ' · ' + esc(nomorHp(n.jid)) : ''} · belum dibalas ${Number(n.chat_belum_dibalas) || 0}${k === 'terputus' ? ' · mode baca, scan ulang untuk balas' : ''}">
-        <span class="foto">${foto(n)}</span><i class="${k}">${k === 'terputus' ? IKON_PUTUS : ''}</i>${Number(n.chat_belum_dibalas) > 0 ? '<b>' + n.chat_belum_dibalas + '</b>' : ''}<span class="lbl">${esc(labelPendek(labelSlot(n)))}</span>${k === 'terputus' ? '<span class="lbl-putus">Terputus</span>' : ''}</button>`; }).join('');
+        <span class="foto">${foto(n)}</span><i class="${k}">${k === 'terputus' ? IKON_PUTUS : ''}</i>${Number(n.chat_belum_dibalas) > 0 ? '<b>' + n.chat_belum_dibalas + '</b>' : ''}<span class="lbl">${esc(labelPendek(labelSlot(n)))}</span>${nomorSlot(n) ? `<span class="no"><span class="no-penuh">${esc(nomorSlot(n))}</span><span class="no-pendek">…${esc(nomorSlot(n).slice(-4))}</span></span>` : ''}${k === 'terputus' ? '<span class="lbl-putus">Terputus</span>' : ''}</button>`; }).join('');
     const n = S.nomor.find(x => String(x.id) === String(S.nomorAktif));
     const judulAkun = (n) => { const l = labelSlot(n), sisa = l.split(/\s+[-–—]\s+/).slice(1).join(' - '); return sisa ? labelPendek(l) + ' — ' + sisa : l; };
-    $('#judulNomor').textContent = n ? judulAkun(n) : 'Semua nomor';
+    $('#judulNomor').innerHTML = n ? esc(judulAkun(n)) + (nomorSlot(n) ? ` <span class="judul-no">· ${esc(nomorSlot(n))}</span>` : '') : 'Semua nomor';
     renderRingkas(judulAkun);
     $('#statusNomor').innerHTML = n ? `<span class="st ${keadaan(n)}">${keadaan(n) === 'terputus' ? IKON_PUTUS + ' ' : ''}${esc(STATUS[keadaan(n)])}</span>` : '';
     renderKartu();
@@ -78,7 +80,7 @@
     const box = $('#ringkas'); if (!box) return;
     const tot = S.nomor.reduce((a, n) => a + (Number(n.chat_belum_dibalas) || 0), 0), angka = (x, putus) => `<b class="${x > 0 ? (putus ? 'redup' : 'merah') : ''}">${x}</b>`;
     box.innerHTML = `<span class="r-judul">Belum dibalas:</span> <button type="button" data-n="semua" class="${S.nomorAktif === 'semua' ? 'on' : ''}" title="Semua akun">${angka(tot)}</button>` +
-      S.nomor.map(n => { const putus = keadaan(n) === 'terputus'; return `<span class="r-sep">·</span><button type="button" data-n="${n.id}" class="${String(S.nomorAktif) === String(n.id) ? 'on' : ''} ${putus ? 'putus' : ''}" title="${esc(judulAkun(n))}${putus ? ' · Terputus' : ''}">${putus ? IKON_PUTUS : ''}${esc(labelPendek(labelSlot(n)).replace(/\s+/g, ''))} ${angka(Number(n.chat_belum_dibalas) || 0, putus)}</button>`; }).join('');
+      S.nomor.map(n => { const putus = keadaan(n) === 'terputus'; return `<span class="r-sep">·</span><button type="button" data-n="${n.id}" class="${String(S.nomorAktif) === String(n.id) ? 'on' : ''} ${putus ? 'putus' : ''}" title="${esc(judulAkun(n))}${nomorSlot(n) ? ' · ' + esc(nomorSlot(n)) : ''}${putus ? ' · Terputus' : ''}">${putus ? IKON_PUTUS : ''}${esc(labelPendek(labelSlot(n)).replace(/\s+/g, ''))}${nomorSlot(n) ? ` <span class="r-no">${esc(nomorSlot(n))}</span>` : ''} ${angka(Number(n.chat_belum_dibalas) || 0, putus)}</button>`; }).join('');
   }
   $('#ringkas').addEventListener('click', (e) => { const b = e.target.closest('button[data-n]'); if (!b) return; S.nomorAktif = b.dataset.n; S.jejakChats = ''; renderRel(); muatChats(); });
   // filter "Belum dibalas" (akun terpilih atau Semua)
