@@ -294,8 +294,17 @@ async function mulai(id) {
     try {
       if (u.qr) { SESI[id].status = 'perlu_scan'; await q("UPDATE nomor SET status = 'perlu_scan', qr = ?, qr_at = NOW() WHERE id = ?", [u.qr, id]); }
       if (u.connection === 'open') {
+        // [28 Okt] slot masih menyimpan riwayat nomor LAIN → tolak, supaya chat 2 nomor tidak tercampur (lepas + hapus riwayat dulu)
+        const jidBaru = jidNormalizedUser(sock.user && sock.user.id);
+        const lama = (await q('SELECT n.jid, (SELECT COUNT(*) FROM chat c WHERE c.nomor_id = n.id) chat FROM nomor n WHERE n.id = ?', [id]))[0];
+        if (lama && lama.jid && lama.jid !== jidBaru && Number(lama.chat) > 0) {
+          log(`[${id}] ditolak: ${jidBaru} dipindai ke slot berisi riwayat ${lama.jid}`);
+          SESI[id].berhenti = true; SESI[id].alasan = `nomor beda (+${String(jidBaru).split('@')[0]}); riwayat +${String(lama.jid).split('@')[0]} masih di slot ini`;
+          try { await sock.logout(); } catch (e) { try { sock.end(); } catch (e2) { /* */ } }
+          return;
+        }
         SESI[id].status = 'terhubung';
-        await q("UPDATE nomor SET status = 'terhubung', qr = NULL, jid = ?, terakhir_terhubung = NOW(), alasan_putus = NULL WHERE id = ?", [jidNormalizedUser(sock.user && sock.user.id), id]);
+        await q("UPDATE nomor SET status = 'terhubung', qr = NULL, jid = ?, terakhir_terhubung = NOW(), alasan_putus = NULL WHERE id = ?", [jidBaru, id]);
         log(`[${id}] terhubung ${sock.user && sock.user.id}`);
         setTimeout(() => ambilFoto(id).catch(() => {}), 5000);
         setTimeout(async () => {   // daftar kontak penuh dari HP (nama tersimpan) + peta LID + pushName chat lama
@@ -317,11 +326,14 @@ async function mulai(id) {
         const keluar = kode === DisconnectReason.loggedOut;
         // QR tidak dipindai sampai habis waktu (belum pernah tertaut) → berhenti, tidak membuat QR terus-menerus; tombol "Tautkan" untuk coba lagi
         const berhenti = (SESI[id] && SESI[id].berhenti) || (!(state.creds && state.creds.me) && kode !== DisconnectReason.restartRequired);
+        const alasan = (SESI[id] && SESI[id].alasan) || (keluar ? '401 keluar dari HP' : String(kode || 'tutup'));
+        const hapus = SESI[id] && SESI[id].hapusRiwayat;
         delete SESI[id];
         const status = keluar ? 'perlu_scan' : 'terputus';
-        await q('UPDATE nomor SET status = ?, terakhir_putus = NOW(), alasan_putus = ?, qr = NULL WHERE id = ?', [berhenti ? 'belum' : status, String(kode || 'tutup'), id]);
+        await q('UPDATE nomor SET status = ?, terakhir_putus = NOW(), alasan_putus = ?, qr = NULL WHERE id = ?', [berhenti ? 'belum' : status, alasan.slice(0, 120), id]);
         log(`[${id}] putus kode ${kode}${keluar ? ' (keluar dari HP)' : ''}`);
         if (keluar || berhenti) { fs.rmSync(dir, { recursive: true, force: true }); }
+        if (hapus) await hapusRiwayat(id);
         if (!berhenti) {
           const n = (await q('SELECT label, notif_putus_tgl, terakhir_terhubung FROM nomor WHERE id = ?', [id]))[0];
           if (n && n.terakhir_terhubung && n.notif_putus_tgl !== tglHariIni()) {
@@ -409,12 +421,32 @@ async function prosesFotoKontak() {
   } catch (e) { /* tidak ada foto / privat / dibatasi */ }
   await q('UPDATE chat SET foto_path = ?, foto_ada = ?, foto_at = NOW() WHERE id = ?', [rel, rel ? 1 : 0, r.id]);
 }
-async function putuskan(id) {
-  const s = SESI[id];
+// "Lepas & hapus sesi" dari web: minta_putuskan 1 = lepas, riwayat disimpan (bisa dibaca & scan ulang nomor yang sama); 2 = lepas + hapus riwayat slot
+async function putuskan(id, mode) {
+  const s = SESI[id], hapus = Number(mode) === 2;
   await q('UPDATE nomor SET minta_putuskan = 0 WHERE id = ?', [id]);
-  if (!s) { fs.rmSync(path.join(DATA, 'sesi', String(id)), { recursive: true, force: true }); await q("UPDATE nomor SET status = 'belum', qr = NULL WHERE id = ?", [id]); return; }
-  s.berhenti = true;
+  log(`[${id}] lepas dari web${hapus ? ' + hapus riwayat' : ' (riwayat disimpan)'}`);
+  if (!s) {
+    fs.rmSync(path.join(DATA, 'sesi', String(id)), { recursive: true, force: true });
+    await q("UPDATE nomor SET status = 'belum', qr = NULL, terakhir_putus = COALESCE(terakhir_putus, NOW()), alasan_putus = 'dilepas dari web' WHERE id = ?", [id]);
+    if (hapus) await hapusRiwayat(id);
+    return;
+  }
+  s.berhenti = true; s.alasan = 'dilepas dari web'; s.hapusRiwayat = hapus;
   try { await s.sock.logout(); } catch (e) { try { s.sock.end(); } catch (e2) { /* */ } }
+}
+// hapus SEMUA riwayat 1 slot (chat, pesan, media, kontak, foto) — hanya atas pilihan "hapus riwayat" + ketik HAPUS di web. Audit & log akses tetap.
+async function hapusRiwayat(id) {
+  id = Number(id); if (!(id >= 1 && id <= 6)) return;
+  const sisa = async (sql) => { let n = 0, r; do { r = await q(sql + ' LIMIT 2000', [id]); n += r.affectedRows; } while (r.affectedRows > 0); return n; };
+  const sub = 'pesan_id IN (SELECT id FROM (SELECT id FROM pesan WHERE nomor_id = ?) x)';
+  for (const t of ['pesan_versi', 'pesan_reaksi', 'pesan_terima_grup', 'media']) await sisa(`DELETE FROM ${t} WHERE ${sub}`);
+  const jml = await sisa('DELETE FROM pesan WHERE nomor_id = ?');
+  for (const t of ['chat', 'kontak', 'lid_map', 'antrean_kirim', 'ringkasan_harian']) await sisa(`DELETE FROM ${t} WHERE nomor_id = ?`);
+  for (const d of [String(id), path.join('foto-kontak', String(id)), path.join('profil', id + '.jpg')]) fs.rmSync(path.join(DATA, 'media', d), { recursive: true, force: true });
+  await q('UPDATE nomor SET jid = NULL, nama_wa = NULL, foto_path = NULL, foto_at = NULL, riwayat_progres = NULL, terakhir_terhubung = NULL WHERE id = ?', [id]);
+  chatCache.clear(); delete LID[id];
+  log(`[${id}] riwayat slot dihapus (${jml} pesan)`);
 }
 
 // ---------------------------------------------------------------- media (unduh di latar, 2 sekaligus)
@@ -561,7 +593,7 @@ async function kompresMedia() {   // media > 6 bulan: gambar max 1280 px kualita
 // ---------------------------------------------------------------- putaran utama
 async function kendali() {   // permintaan dari halaman Hubungkan
   for (const n of await q('SELECT id, minta_tautkan, minta_putuskan, aktif FROM nomor')) {
-    if (n.minta_putuskan) await putuskan(n.id);
+    if (n.minta_putuskan) await putuskan(n.id, n.minta_putuskan);
     else if (n.minta_tautkan && !SESI[n.id]) await mulai(n.id);
   }
 }

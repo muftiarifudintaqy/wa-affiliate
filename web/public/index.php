@@ -17,7 +17,7 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
 <link rel="icon" href="/img/prepare-bulat.png"><meta name="theme-color" content="#4A55A2">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/app.css?v=8">
+<link rel="stylesheet" href="/app.css?v=12">
 </head><body>
 <?php if (!$u): ?>
 <main class="masuk"><span class="masuk-cahaya" aria-hidden="true"></span>
@@ -63,6 +63,7 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
         <div class="obrolan-nama"><b id="namaChat"></b><span id="infoChat" class="kecil"></span></div>
         <button id="btnDibaca" class="btn-garis">Tandai dibaca</button>
       </header>
+      <div class="banner-putus" id="bannerPutus" role="status" hidden></div>
       <div class="isi" id="isiPesan" aria-live="polite"></div>
       <footer class="tulis" id="tulis" hidden>
         <div class="kutip-bar" id="kutipBar" hidden><span id="kutipTeks"></span><button id="kutipBatal" aria-label="Batal membalas">✕</button></div>
@@ -85,6 +86,6 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
 <div class="modal" id="modal" hidden><div class="modal-kartu"><button class="modal-tutup" id="modalTutup" aria-label="Tutup">✕</button><div id="modalIsi"></div></div></div>
 <div class="toast" id="toast" role="status" hidden></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="/app.js?v=5"></script>
+<script src="/app.js?v=8"></script>
 <?php endif; ?>
 </body></html>

@@ -76,7 +76,7 @@ case 'pesan':   // isi 1 chat (terbaru dulu, halaman per 60), lengkap: media, ku
               (SELECT COALESCE(k.nama_simpan, k.push_name, k.nama_bisnis, k.nama) FROM kontak k WHERE k.nomor_id = p.nomor_id AND k.jid = p.pengirim_jid) pengirim_nama
             FROM pesan p LEFT JOIN media m ON m.pesan_id = p.id LEFT JOIN pesan q ON q.chat_id = p.chat_id AND q.wa_id = p.kutipan_wa_id
             WHERE p.chat_id = ? ' . ($sebelum ? 'AND p.id < ? ' : '') . 'ORDER BY p.waktu DESC, p.id DESC LIMIT 60', $sebelum ? [$chat, $sebelum] : [$chat])->fetchAll();
-    $info = q('SELECT c.id, c.nomor_id, n.label nomor_label, n.status nomor_status, c.jid, c.jenis, ' . NAMA_KOLOM . ', c.waktu_balas_rata_detik, c.belum_dibalas_sejak
+    $info = q('SELECT c.id, c.nomor_id, n.label nomor_label, n.status nomor_status, n.jid nomor_jid, n.qr IS NOT NULL nomor_qr, c.jid, c.jenis, ' . NAMA_KOLOM . ', c.waktu_balas_rata_detik, c.belum_dibalas_sejak
                FROM chat c JOIN nomor n ON n.id = c.nomor_id LEFT JOIN kontak k ON k.nomor_id = c.nomor_id AND k.jid = c.jid WHERE c.id = ?', [$chat])->fetch();
     json_out(['ok' => true, 'chat' => $info, 'pesan' => array_reverse($r), 'sekarang' => date('Y-m-d H:i:s')]);
 
@@ -155,8 +155,12 @@ case 'antrean':   // status kiriman (untuk tanda jam/centang di tampilan)
 case 'tautkan': case 'putuskan':
     if (!$post) json_out(['ok' => false], 405);
     $n = $int('nomor'); if ($n < 1 || $n > 6) json_out(['ok' => false, 'pesan' => 'Nomor tidak valid']);
-    q($aksi === 'tautkan' ? 'UPDATE nomor SET minta_tautkan = 1 WHERE id = ?' : 'UPDATE nomor SET minta_putuskan = 1 WHERE id = ?', [$n]);
-    catat_akses('hubungkan', $n, null, $aksi);
+    if ($aksi === 'tautkan') { q('UPDATE nomor SET minta_tautkan = 1 WHERE id = ?', [$n]); catat_akses('hubungkan', $n, null, 'tautkan'); json_out(['ok' => true]); }
+    // [28 Okt] "Lepas & hapus sesi": riwayat=simpan (default) atau hapus (wajib ketik HAPUS). Diproses server WA: 1 = lepas, 2 = lepas + hapus riwayat.
+    $hapus = $in('riwayat') === 'hapus';
+    if ($hapus && $in('konfirmasi') !== 'HAPUS') json_out(['ok' => false, 'pesan' => 'Ketik HAPUS untuk menghapus riwayat.']);
+    q('UPDATE nomor SET minta_putuskan = ? WHERE id = ?', [$hapus ? 2 : 1, $n]);
+    catat_akses('hubungkan', $n, null, $hapus ? 'lepas sesi + hapus riwayat' : 'lepas sesi, riwayat disimpan');
     json_out(['ok' => true]);
 case 'label':
     if (!$post) json_out(['ok' => false], 405);
