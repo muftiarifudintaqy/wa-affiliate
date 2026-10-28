@@ -82,17 +82,108 @@ const SESI = {};          // id -> { sock, status, berhenti }
 const grupJudul = {};      // `${id}|${jid}` -> sudah diminta
 const chatCache = new Map();
 
-function jidChat(key) {
-  // v7: kontak bisa ber-LID; pakai nomor telepon (remoteJidAlt) kalau ada supaya chat tidak terbelah
-  const j = key.remoteJidAlt && String(key.remoteJid).endsWith('@lid') ? key.remoteJidAlt : key.remoteJid;
-  return isJidGroup(j) ? j : jidNormalizedUser(j);
+// ---------------------------------------------------------------- LID → nomor HP (v7: kontak bisa tampil sebagai LID, angka panjang bukan nomor)
+const LID = {};                                   // nomor_id -> Map(lidUser -> pnUser)
+const pengguna = (j) => String(j || '').split('@')[0].split(':')[0];
+const adalahPn = (j) => /@s\.whatsapp\.net$/.test(String(j || ''));
+const adalahLid = (j) => /@lid$/.test(String(j || ''));
+const petaLid = (id) => (LID[id] = LID[id] || new Map());
+const dicari = new Set();
+/** Simpan pasangan LID→nomor, lalu gabungkan chat & kontak LID ke nomor HP (pesan dipindah, tidak dihapus). */
+async function simpanLid(id, lid, pn, sumber) {
+  lid = pengguna(lid); pn = pengguna(pn);
+  if (!lid || !pn || !/^\d{6,20}$/.test(pn)) return;
+  const peta = petaLid(id); if (peta.get(lid) === pn && sumber !== 'paksa') return;
+  peta.set(lid, pn);
+  await q('INSERT INTO lid_map (nomor_id, lid, pn, sumber, diperbarui_at) VALUES (?, ?, ?, ?, NOW()) ON DUPLICATE KEY UPDATE pn = VALUES(pn), sumber = VALUES(sumber), diperbarui_at = NOW()', [id, lid, pn, sumber]);
+  await gabungLid(id, lid, pn);
+}
+async function gabungLid(id, lid, pn) {
+  const jl = lid + '@lid', jp = pn + '@s.whatsapp.net';
+  const cl = (await q('SELECT id FROM chat WHERE nomor_id = ? AND jid = ?', [id, jl]))[0];
+  if (cl) {
+    const cp = (await q('SELECT id FROM chat WHERE nomor_id = ? AND jid = ?', [id, jp]))[0];
+    if (!cp) await q('UPDATE chat SET jid = ?, pn = ?, lid = ? WHERE id = ?', [jp, pn, lid, cl.id]);
+    else {
+      await q('UPDATE IGNORE pesan SET chat_id = ? WHERE chat_id = ?', [cp.id, cl.id]);
+      await q('DELETE FROM pesan WHERE chat_id = ?', [cl.id]);                       // sisa = duplikat pesan yang sama
+      await q(`UPDATE chat a JOIN chat b ON b.id = ? SET a.lid = ?, a.pn = ?,
+                 a.pesan_terakhir_at = GREATEST(COALESCE(a.pesan_terakhir_at, b.pesan_terakhir_at), COALESCE(b.pesan_terakhir_at, a.pesan_terakhir_at)),
+                 a.cuplikan = IF(b.pesan_terakhir_at > a.pesan_terakhir_at, b.cuplikan, a.cuplikan), a.cuplikan_dari_tim = IF(b.pesan_terakhir_at > a.pesan_terakhir_at, b.cuplikan_dari_tim, a.cuplikan_dari_tim)
+               WHERE a.id = ?`, [cl.id, lid, pn, cp.id]);
+      await q('DELETE FROM chat WHERE id = ?', [cl.id]);
+    }
+    chatCache.delete(id + '|' + jl); chatCache.delete(id + '|' + jp);
+  }
+  const kl = (await q('SELECT * FROM kontak WHERE nomor_id = ? AND jid = ?', [id, jl]))[0];
+  if (kl) {
+    await q(`INSERT INTO kontak (nomor_id, jid, nama, nama_simpan, push_name, nama_bisnis, pn, lid, pertama_dilihat, diperbarui_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE nama = COALESCE(nama, VALUES(nama)), nama_simpan = COALESCE(nama_simpan, VALUES(nama_simpan)), push_name = COALESCE(push_name, VALUES(push_name)),
+               nama_bisnis = COALESCE(nama_bisnis, VALUES(nama_bisnis)), lid = VALUES(lid), pn = VALUES(pn), pertama_dilihat = LEAST(pertama_dilihat, VALUES(pertama_dilihat)), diperbarui_at = NOW()`,
+      [id, jp, kl.nama, kl.nama_simpan, kl.push_name, kl.nama_bisnis, pn, lid, kl.pertama_dilihat]);
+    await q('DELETE FROM kontak WHERE nomor_id = ? AND jid = ?', [id, jl]);
+  } else await q('UPDATE kontak SET lid = ? WHERE nomor_id = ? AND jid = ?', [lid, id, jp]);
+  await q('UPDATE pesan SET pengirim_jid = ? WHERE nomor_id = ? AND pengirim_jid = ?', [jp, id, jl]);
+}
+/** LID belum dikenal → tanya Baileys di latar (tidak menahan penyimpanan pesan). */
+function cariPn(id, jl) {
+  const k = id + '|' + jl; if (dicari.has(k)) return; dicari.add(k);
+  setTimeout(async () => {
+    try { const s = SESI[id]; const pn = s && s.sock.signalRepository && s.sock.signalRepository.lidMapping && await s.sock.signalRepository.lidMapping.getPNForLID(jl);
+      if (pn) await simpanLid(id, jl, pn, 'baileys'); } catch (e) { /* belum diketahui */ }
+  }, 500);
+}
+/** Muat peta LID dari DB + dari file sesi Baileys (lid-mapping-<lid>_reverse.json berisi nomor HP). */
+async function muatPetaLid(id) {
+  const peta = petaLid(id);
+  for (const r of await q('SELECT lid, pn FROM lid_map WHERE nomor_id = ?', [id])) peta.set(r.lid, r.pn);
+  const dir = path.join(DATA, 'sesi', String(id)); let baru = 0;
+  for (const f of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+    const m = f.match(/^lid-mapping-(\d+)_reverse\.json$/); if (!m || peta.has(m[1])) continue;
+    try { const pn = pengguna(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'))); if (/^\d{6,20}$/.test(pn)) { await simpanLid(id, m[1], pn, 'sesi'); baru++; } } catch (e) { /* lewati */ }
+  }
+  // chat/kontak LID yang pasangannya sudah ada di peta tapi belum digabung
+  for (const c of await q("SELECT jid FROM chat WHERE nomor_id = ? AND jid LIKE '%@lid'", [id])) { const pn = peta.get(pengguna(c.jid)); if (pn) await gabungLid(id, pengguna(c.jid), pn); }
+  for (const c of await q("SELECT jid FROM kontak WHERE nomor_id = ? AND jid LIKE '%@lid'", [id])) { const pn = peta.get(pengguna(c.jid)); if (pn) await gabungLid(id, pengguna(c.jid), pn); }
+  if (baru) log(`[${id}] peta LID: +${baru} dari file sesi (total ${peta.size})`);
+}
+/** Chat tujuan pesan: nomor HP kalau diketahui (remoteJidAlt / peta LID), selain itu LID (dicari di latar). */
+function jidChat(key, id) {
+  const r = key.remoteJid, alt = key.remoteJidAlt;
+  if (isJidGroup(r)) return r;
+  if (adalahLid(r)) {
+    if (alt && adalahPn(alt)) { if (petaLid(id).get(pengguna(r)) !== pengguna(alt)) simpanLid(id, r, alt, 'pesan').catch(() => {}); return jidNormalizedUser(alt); }
+    const pn = petaLid(id).get(pengguna(r)); if (pn) return pn + '@s.whatsapp.net';
+    cariPn(id, jidNormalizedUser(r));
+  }
+  return jidNormalizedUser(r);
+}
+/** Nama dari buku kontak HP tim (name), pushName kontak (notify), nama bisnis (verifiedName). Hanya kolom yang dikirim yang diubah. */
+async function simpanKontak(id, c) {
+  if (!c || !c.id || isJidGroup(c.id) || c.id === 'status@broadcast') return;
+  const lid = adalahLid(c.id) ? pengguna(c.id) : (c.lid ? pengguna(c.lid) : null);
+  const pn = adalahPn(c.id) ? pengguna(c.id) : (c.phoneNumber ? pengguna(c.phoneNumber) : (lid && petaLid(id).get(lid)) || null);
+  if (lid && pn) await simpanLid(id, lid, pn, 'kontak');
+  const jid = pn ? pn + '@s.whatsapp.net' : lid + '@lid';
+  const v = (x) => (x === undefined || x === null || String(x).trim() === '') ? null : String(x).trim().slice(0, 200);
+  await q(`INSERT INTO kontak (nomor_id, jid, nama_simpan, push_name, nama_bisnis, pn, lid, pertama_dilihat, diperbarui_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+           ON DUPLICATE KEY UPDATE nama_simpan = COALESCE(VALUES(nama_simpan), nama_simpan), push_name = COALESCE(VALUES(push_name), push_name), nama_bisnis = COALESCE(VALUES(nama_bisnis), nama_bisnis),
+             pn = COALESCE(VALUES(pn), pn), lid = COALESCE(VALUES(lid), lid), diperbarui_at = NOW()`, [id, jid, v(c.name), v(c.notify), v(c.verifiedName), pn, lid]);
+}
+/** pushName chat lama dari pesan yang sudah tersimpan (sekali per kontak yang belum punya). */
+async function isiPushNameLama(id) {
+  const rows = await q(`SELECT c.id, c.jid, (SELECT p.raw FROM pesan p WHERE p.chat_id = c.id AND p.dari_tim = 0 AND p.raw LIKE '%"pushName"%' ORDER BY p.waktu DESC LIMIT 1) raw
+                        FROM chat c LEFT JOIN kontak k ON k.nomor_id = c.nomor_id AND k.jid = c.jid WHERE c.nomor_id = ? AND c.jenis = 'pribadi' AND k.push_name IS NULL`, [id]);
+  let n = 0;
+  for (const r of rows) { if (!r.raw) continue; try { const nm = JSON.parse(r.raw).pushName; if (nm) { await simpanKontak(id, { id: r.jid, notify: nm }); n++; } } catch (e) { /* */ } }
+  if (n) log(`[${id}] pushName chat lama: ${n} kontak`);
 }
 async function chatId(id, jid, judul) {
   const k = id + '|' + jid;
   if (chatCache.has(k) && !judul) return chatCache.get(k);
   const grup = !!isJidGroup(jid);
-  await q(`INSERT INTO chat (nomor_id, jid, jenis, judul, simpan) VALUES (?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE judul = COALESCE(VALUES(judul), judul)`, [id, jid, grup ? 'grup' : 'pribadi', judul || null, grup ? 0 : 1]);
+  await q(`INSERT INTO chat (nomor_id, jid, pn, lid, jenis, judul, simpan) VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE judul = COALESCE(VALUES(judul), judul)`, [id, jid, adalahPn(jid) ? pengguna(jid) : null, adalahLid(jid) ? pengguna(jid) : null, grup ? 'grup' : 'pribadi', grup ? (judul || null) : null, grup ? 0 : 1]);
   const r = (await q('SELECT id, simpan, jenis FROM chat WHERE nomor_id = ? AND jid = ?', [id, jid]))[0];
   chatCache.set(k, r);
   return r;
@@ -108,7 +199,7 @@ async function simpanPesan(id, msg, opsi = {}) {
   const jidMentah = msg.key.remoteJid || '';
   if (jidMentah === 'status@broadcast' || jidMentah.endsWith('@newsletter') || jidMentah.endsWith('@broadcast')) return null;   // status/story & saluran tidak disimpan
   const u = urai(msg); if (!u) return null;
-  const jid = jidChat(msg.key);
+  const jid = jidChat(msg.key, id);
   const ch = await chatId(id, jid);
   if (ch.jenis === 'grup') { judulGrup(id, jid); if (!ch.simpan) return null; }
   const waktu = jam(msg.messageTimestamp || Date.now() / 1000);
@@ -116,12 +207,15 @@ async function simpanPesan(id, msg, opsi = {}) {
   if (u.jenis === 'protokol' && u.protokol) return simpanProtokol(id, ch.id, u.protokol, waktu, !!msg.key.fromMe, opsi);
   if (u.jenis === 'reaksi') return simpanReaksi(id, ch.id, u.reaksi, msg.key, waktu, opsi);
 
-  if (!msg.key.fromMe && msg.pushName && ch.jenis === 'pribadi') await q('INSERT INTO kontak (nomor_id, jid, nama, pertama_dilihat) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE nama = COALESCE(nama, VALUES(nama)), pertama_dilihat = LEAST(pertama_dilihat, VALUES(pertama_dilihat))', [id, jid, msg.pushName, waktu]);
-  else if (ch.jenis === 'pribadi') await q('INSERT INTO kontak (nomor_id, jid, pertama_dilihat) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE pertama_dilihat = LEAST(pertama_dilihat, VALUES(pertama_dilihat))', [id, jid, waktu]);
+  if (ch.jenis === 'pribadi') await q(`INSERT INTO kontak (nomor_id, jid, push_name, pn, lid, pertama_dilihat) VALUES (?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE push_name = COALESCE(VALUES(push_name), push_name), pertama_dilihat = LEAST(pertama_dilihat, VALUES(pertama_dilihat))`,
+    [id, jid, !msg.key.fromMe && msg.pushName ? String(msg.pushName).slice(0, 200) : null, adalahPn(jid) ? pengguna(jid) : null, adalahLid(jid) ? pengguna(jid) : null, waktu]);
 
   const status = msg.key.fromMe ? Math.max(1, Math.min(4, (Number(msg.status) || 2) - 1)) : 0;
   const raw = JSON.stringify(msg, BufferJSON.replacer);
-  const peng = isJidGroup(jid) ? (msg.key.participantAlt || msg.key.participant || null) : null;
+  let peng = isJidGroup(jid) ? (msg.key.participantAlt || msg.key.participant || null) : null;
+  if (peng && adalahLid(peng)) { const pn = petaLid(id).get(pengguna(peng)); if (pn) peng = pn + '@s.whatsapp.net'; else cariPn(id, jidNormalizedUser(peng)); }
+  if (peng && !msg.key.fromMe && msg.pushName) simpanKontak(id, { id: peng, notify: msg.pushName }).catch(() => {});   // nama pengirim di grup
   const r = await q(`INSERT INTO pesan (nomor_id, chat_id, wa_id, dari_tim, pengirim_jid, jenis, teks, kutipan_wa_id, waktu, status, dari_web, web_user_id, dari_riwayat, raw, diterima_server_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
       ON DUPLICATE KEY UPDATE raw = COALESCE(raw, VALUES(raw)), dari_web = GREATEST(dari_web, VALUES(dari_web)), web_user_id = COALESCE(web_user_id, VALUES(web_user_id)),
@@ -172,7 +266,7 @@ async function simpanStatus(id, key, st, t) {
   const s = STATUS[st]; if (!s) return;
   const kol = s === 1 ? 'terkirim_at' : s === 2 ? 'diterima_at' : 'dibaca_at';
   await q(`UPDATE pesan p JOIN chat c ON c.id = p.chat_id SET p.status = GREATEST(p.status, ?), p.${kol} = COALESCE(p.${kol}, ?)
-           WHERE p.nomor_id = ? AND c.jid = ? AND p.wa_id = ?`, [s, jam(t), id, jidChat(key), key.id]);
+           WHERE p.nomor_id = ? AND c.jid = ? AND p.wa_id = ?`, [s, jam(t), id, jidChat(key, id), key.id]);
 }
 
 // ---------------------------------------------------------------- koneksi
@@ -203,6 +297,12 @@ async function mulai(id) {
         SESI[id].status = 'terhubung';
         await q("UPDATE nomor SET status = 'terhubung', qr = NULL, jid = ?, terakhir_terhubung = NOW(), alasan_putus = NULL WHERE id = ?", [jidNormalizedUser(sock.user && sock.user.id), id]);
         log(`[${id}] terhubung ${sock.user && sock.user.id}`);
+        setTimeout(() => ambilFoto(id).catch(() => {}), 5000);
+        setTimeout(async () => {   // daftar kontak penuh dari HP (nama tersimpan) + peta LID + pushName chat lama
+          try { await muatPetaLid(id); } catch (e) { log(`[${id}] peta LID`, e.message); }
+          try { await sock.resyncAppState(['critical_unblock_low', 'regular_high', 'regular_low', 'critical_block', 'regular'], true); log(`[${id}] sinkron kontak HP selesai`); } catch (e) { log(`[${id}] sinkron kontak`, e.message); }
+          try { await isiPushNameLama(id); } catch (e) { log(`[${id}] pushName lama`, e.message); }
+        }, 8000);
       }
       if (u.connection === 'close') {
         const kode = u.lastDisconnect && u.lastDisconnect.error && u.lastDisconnect.error.output && u.lastDisconnect.error.output.statusCode;
@@ -229,7 +329,7 @@ async function mulai(id) {
   sock.ev.on('messaging-history.set', async ({ chats, contacts, messages, progress }) => {
     try {
       for (const c of chats || []) { const j = c.id; if (!j || j === 'status@broadcast' || j.endsWith('@newsletter')) continue; if (c.name) await chatId(id, isJidGroup(j) ? j : jidNormalizedUser(j), c.name); }
-      for (const k of contacts || []) { if (!k.id || isJidGroup(k.id)) continue; const nm = k.name || k.notify || k.verifiedName; if (nm) await q('UPDATE kontak SET nama = ? WHERE nomor_id = ? AND jid = ?', [nm, id, jidNormalizedUser(k.id)]); }
+      for (const k of contacts || []) await simpanKontak(id, k).catch(() => {});
       for (const m of messages || []) { try { await simpanPesan(id, m, { riwayat: true }); } catch (e) { /* satu pesan gagal tidak menghentikan riwayat */ } }
       if (progress != null) await q('UPDATE nomor SET riwayat_progres = ? WHERE id = ?', [Math.round(progress), id]);
       log(`[${id}] riwayat: ${(messages || []).length} pesan, ${(chats || []).length} chat${progress != null ? ', ' + progress + '%' : ''}`);
@@ -243,12 +343,12 @@ async function mulai(id) {
       try {
         if (update.status) await simpanStatus(id, key, update.status, Date.now() / 1000);
         if (update.message && (update.message.editedMessage || update.message.protocolMessage)) {
-          const ch = await chatId(id, jidChat(key));
+          const ch = await chatId(id, jidChat(key, id));
           const p = update.message.protocolMessage || (update.message.editedMessage.message && update.message.editedMessage.message.protocolMessage);
           if (p) await simpanProtokol(id, ch.id, p, jam(), !!key.fromMe, {});
         }
         if (update.messageStubType === proto.WebMessageInfo.StubType.REVOKE || (update.message === null && update.messageStubType)) {
-          await q('UPDATE pesan p JOIN chat c ON c.id = p.chat_id SET p.dihapus_semua_at = COALESCE(p.dihapus_semua_at, NOW()) WHERE p.nomor_id = ? AND c.jid = ? AND p.wa_id = ?', [id, jidChat(key), key.id]);
+          await q('UPDATE pesan p JOIN chat c ON c.id = p.chat_id SET p.dihapus_semua_at = COALESCE(p.dihapus_semua_at, NOW()) WHERE p.nomor_id = ? AND c.jid = ? AND p.wa_id = ?', [id, jidChat(key, id), key.id]);
         }
       } catch (e) { log(`[${id}] update`, e.message); }
     }
@@ -258,16 +358,46 @@ async function mulai(id) {
       try {
         const t = receipt.playedTimestamp || receipt.readTimestamp || receipt.receiptTimestamp;
         const s = receipt.playedTimestamp ? 4 : receipt.readTimestamp ? 3 : 2;
-        const ps = (await q('SELECT p.id FROM pesan p JOIN chat c ON c.id = p.chat_id WHERE p.nomor_id = ? AND c.jid = ? AND p.wa_id = ?', [id, jidChat(key), key.id]))[0];
+        const ps = (await q('SELECT p.id FROM pesan p JOIN chat c ON c.id = p.chat_id WHERE p.nomor_id = ? AND c.jid = ? AND p.wa_id = ?', [id, jidChat(key, id), key.id]))[0];
         if (ps && receipt.userJid) await q('INSERT INTO pesan_terima_grup (pesan_id, jid, status, waktu) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE status = GREATEST(status, VALUES(status)), waktu = VALUES(waktu)', [ps.id, jidNormalizedUser(receipt.userJid), s, jam(t)]);
       } catch (e) { /* lewati */ }
     }
   });
   sock.ev.on('messages.reaction', async (rs) => {
-    for (const { key, reaction } of rs) { try { const ch = await chatId(id, jidChat(key)); await simpanReaksi(id, ch.id, { key, text: reaction.text }, reaction.key || key, jam(), {}); } catch (e) { /* lewati */ } }
+    for (const { key, reaction } of rs) { try { const ch = await chatId(id, jidChat(key, id)); await simpanReaksi(id, ch.id, { key, text: reaction.text }, reaction.key || key, jam(), {}); } catch (e) { /* lewati */ } }
   });
-  sock.ev.on('contacts.upsert', async (ks) => { for (const k of ks) { const nm = k.name || k.notify || k.verifiedName; if (nm && k.id && !isJidGroup(k.id)) await q('UPDATE kontak SET nama = ? WHERE nomor_id = ? AND jid = ?', [nm, id, jidNormalizedUser(k.id)]).catch(() => {}); } });
+  // nama kontak realtime: buku kontak HP tim (name), pushName (notify), nama bisnis (verifiedName)
+  sock.ev.on('contacts.upsert', async (ks) => { for (const k of ks) await simpanKontak(id, k).catch(e => log(`[${id}] kontak`, e.message)); });
+  sock.ev.on('contacts.update', async (ks) => { for (const k of ks) { await simpanKontak(id, k).catch(() => {});
+    if (k.id && 'imgUrl' in k) await q('UPDATE chat SET foto_at = NULL WHERE nomor_id = ? AND (jid = ? OR lid = ? OR pn = ?)', [id, jidNormalizedUser(k.id), pengguna(k.id), pengguna(k.id)]).catch(() => {}); } });
+  sock.ev.on('lid-mapping.update', async (m) => { for (const x of [].concat(m || [])) if (x && x.lid && x.pn) await simpanLid(id, x.lid, x.pn, 'wa').catch(() => {}); });
   sock.ev.on('groups.update', async (gs) => { for (const g of gs) if (g.id && g.subject) { chatCache.delete(id + '|' + g.id); await chatId(id, g.id, g.subject).catch(() => {}); } });
+}
+/** Foto profil & nama WA nomor tertaut → DATA/media/profil/<id>.jpg (untuk kartu & sidebar). Tanpa foto = inisial. */
+async function ambilFoto(id) {
+  const s = SESI[id]; if (!s || s.status !== 'terhubung' || !s.sock.user) return;
+  const jid = jidNormalizedUser(s.sock.user.id), nama = s.sock.user.name || s.sock.user.verifiedName || null;
+  let rel = null;
+  try {
+    const url = await s.sock.profilePictureUrl(jid, 'image');
+    if (url) { const r = await fetch(url); if (r.ok) { const buf = Buffer.from(await r.arrayBuffer()); rel = path.join('profil', id + '.jpg'); fs.mkdirSync(path.join(DATA, 'media', 'profil'), { recursive: true }); fs.writeFileSync(path.join(DATA, 'media', rel), buf); } }
+  } catch (e) { /* foto disembunyikan / tidak ada */ }
+  await q('UPDATE nomor SET foto_path = ?, nama_wa = COALESCE(?, nama_wa), foto_at = NOW() WHERE id = ?', [rel, nama, id]);
+}
+/** Foto profil kontak & grup: antrean pelan (1 foto / 8 dtk untuk semua nomor), chat terbaru dulu.
+    Chat aktif hari ini diperbarui tiap 24 jam, lainnya tiap 7 hari; event ganti foto → diambil ulang. Tanpa foto/privat → inisial. */
+async function prosesFotoKontak() {
+  const r = (await q(`SELECT c.id, c.nomor_id, c.jid FROM chat c JOIN nomor n ON n.id = c.nomor_id AND n.status = 'terhubung'
+                      WHERE (c.jenis = 'pribadi' OR c.simpan = 1) AND c.pesan_terakhir_at IS NOT NULL
+                        AND (c.foto_at IS NULL OR (c.pesan_terakhir_at >= NOW() - INTERVAL 1 DAY AND c.foto_at < NOW() - INTERVAL 1 DAY) OR c.foto_at < NOW() - INTERVAL 7 DAY)
+                      ORDER BY c.foto_at IS NOT NULL, c.pesan_terakhir_at DESC LIMIT 1`))[0];
+  if (!r || !SESI[r.nomor_id] || SESI[r.nomor_id].status !== 'terhubung') return;
+  let rel = null;
+  try {
+    const url = await SESI[r.nomor_id].sock.profilePictureUrl(r.jid, 'image');
+    if (url) { const res = await fetch(url); if (res.ok) { rel = path.join('foto-kontak', String(r.nomor_id), r.id + '.jpg'); fs.mkdirSync(path.join(DATA, 'media', path.dirname(rel)), { recursive: true }); fs.writeFileSync(path.join(DATA, 'media', rel), Buffer.from(await res.arrayBuffer())); } }
+  } catch (e) { /* tidak ada foto / privat / dibatasi */ }
+  await q('UPDATE chat SET foto_path = ?, foto_ada = ?, foto_at = NOW() WHERE id = ?', [rel, rel ? 1 : 0, r.id]);
 }
 async function putuskan(id) {
   const s = SESI[id];
@@ -436,6 +566,8 @@ async function utama() {
   ulang(async () => { await hitungRingkasan(tglHariIni()); await hitungBalasChat(false); }, 10 * 60e3, 'ringkasan');
   ulang(async () => { const k = new Date(Date.now() + 7 * 3600e3 - 86400e3).toISOString().slice(0, 10); await hitungRingkasan(k); }, 60 * 60e3, 'ringkasan-kemarin');
   ulang(cekDisk, 60 * 60e3, 'disk');
+  ulang(prosesFotoKontak, 8000, 'foto-kontak');
+  ulang(async () => { for (const k of Object.keys(SESI)) await ambilFoto(Number(k)); }, 6 * 3600e3, 'foto');
   ulang(async () => { if (jam().slice(11, 13) === '03') await kompresMedia(); }, 10 * 60e3, 'kompres');
   setTimeout(() => cekDisk(), 5000);
 }

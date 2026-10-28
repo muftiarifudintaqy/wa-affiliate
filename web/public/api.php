@@ -9,6 +9,9 @@ if ($post) wajib_csrf();
 $in = fn(string $k, $d = null) => $_POST[$k] ?? $_GET[$k] ?? $d;
 $int = fn(string $k) => (int)$in($k, 0);
 const MAKS_UNGGAH = 64 * 1024 * 1024;
+// [28 Okt] nama seperti WhatsApp: nama tersimpan di buku kontak HP tim > pushName kontak > nama bisnis > (nomor di tampilan). Grup = judul grup.
+const NAMA_KOLOM = "CASE WHEN c.jenis = 'grup' THEN c.judul ELSE COALESCE(k.nama_simpan, k.push_name, k.nama_bisnis, k.nama) END nama, k.nama_simpan, k.push_name,
+    COALESCE(c.pn, IF(c.jid LIKE '%@s.whatsapp.net', SUBSTRING_INDEX(c.jid, '@', 1), NULL)) nomor, c.foto_ada, UNIX_TIMESTAMP(c.foto_at) foto_v";
 
 function pesan_info(int $id): array {
     $p = q('SELECT p.*, c.nomor_id cnomor, c.jid cjid, n.status nstatus FROM pesan p JOIN chat c ON c.id = p.chat_id JOIN nomor n ON n.id = p.nomor_id WHERE p.id = ?', [$id])->fetch();
@@ -35,7 +38,10 @@ function chat_info(int $id): array {
 switch ($aksi) {
 
 case 'nomor':   // status 6 nomor + laporan riwayat (pesan paling lama & jumlah pesan)
-    $r = q("SELECT n.id, n.label, n.jid, n.status, n.qr, n.qr_at, n.riwayat_progres, n.terakhir_terhubung, n.terakhir_putus, n.alasan_putus,
+    $r = q("SELECT n.id, n.label, n.jid, n.nama_wa, n.foto_path IS NOT NULL ada_foto, UNIX_TIMESTAMP(n.foto_at) foto_v, n.status, n.qr, n.qr_at, n.riwayat_progres, n.terakhir_terhubung, n.terakhir_putus, n.alasan_putus,
+              (SELECT COUNT(*) FROM chat c WHERE c.nomor_id = n.id AND c.jenis = 'pribadi' AND c.belum_dibalas_sejak IS NOT NULL) chat_belum_dibalas,
+              (SELECT CONCAT_WS('\t', c.pesan_terakhir_at, c.cuplikan_dari_tim, COALESCE(c.judul, k.nama, c.jid), c.cuplikan) FROM chat c LEFT JOIN kontak k ON k.nomor_id = c.nomor_id AND k.jid = c.jid
+                 WHERE c.nomor_id = n.id AND (c.jenis = 'pribadi' OR c.simpan = 1) AND c.pesan_terakhir_at IS NOT NULL ORDER BY c.pesan_terakhir_at DESC LIMIT 1) terakhir,
               (SELECT COUNT(*) FROM pesan p WHERE p.nomor_id = n.id) jumlah_pesan, (SELECT MIN(waktu) FROM pesan p WHERE p.nomor_id = n.id) pesan_terlama,
               (SELECT COUNT(*) FROM chat c WHERE c.nomor_id = n.id AND c.jenis = 'pribadi') jumlah_chat,
               (SELECT COUNT(*) FROM media m JOIN pesan p ON p.id = m.pesan_id WHERE p.nomor_id = n.id AND m.status = 'antre') media_antre
@@ -47,9 +53,10 @@ case 'chats':
     $w = ['(c.jenis = "pribadi" OR c.simpan = 1)', 'c.pesan_terakhir_at IS NOT NULL']; $p = [];
     if ($nomor !== 'semua') { $w[] = 'c.nomor_id = ?'; $p[] = (int)$nomor; }
     if ($sebelum !== '') { $w[] = 'c.pesan_terakhir_at < ?'; $p[] = $sebelum; }
-    if ($cari !== '') { $angka = preg_replace('/\D/', '', $cari); $l = '%' . $cari . '%';
-        $w[] = '(c.judul LIKE ? OR k.nama LIKE ?' . ($angka !== '' ? ' OR c.jid LIKE ?' : '') . ')'; array_push($p, $l, $l); if ($angka !== '') $p[] = '%' . $angka . '%'; }
-    $r = q('SELECT c.id, c.nomor_id, n.label nomor_label, c.jid, c.jenis, COALESCE(c.judul, k.nama) nama, c.cuplikan, c.cuplikan_dari_tim, c.pesan_terakhir_at, c.belum_dibalas_sejak, c.waktu_balas_rata_detik,
+    if ($cari !== '') { $angka = preg_replace('/\D/', '', $cari); $l = '%' . $cari . '%';   // nama tersimpan, pushName, nama bisnis, judul grup, nomor
+        $w[] = '(c.judul LIKE ? OR k.nama LIKE ? OR k.nama_simpan LIKE ? OR k.push_name LIKE ? OR k.nama_bisnis LIKE ?' . ($angka !== '' ? ' OR c.jid LIKE ? OR c.pn LIKE ?' : '') . ')';
+        array_push($p, $l, $l, $l, $l, $l); if ($angka !== '') array_push($p, '%' . $angka . '%', '%' . $angka . '%'); }
+    $r = q('SELECT c.id, c.nomor_id, n.label nomor_label, c.jid, c.jenis, ' . NAMA_KOLOM . ', c.cuplikan, c.cuplikan_dari_tim, c.pesan_terakhir_at, c.belum_dibalas_sejak, c.waktu_balas_rata_detik,
               IF(c.belum_dibalas_sejak IS NULL, 0, (SELECT COUNT(*) FROM pesan x WHERE x.chat_id = c.id AND x.dari_tim = 0 AND x.waktu >= c.belum_dibalas_sejak)) belum_dibalas
             FROM chat c JOIN nomor n ON n.id = c.nomor_id LEFT JOIN kontak k ON k.nomor_id = c.nomor_id AND k.jid = c.jid
             WHERE ' . implode(' AND ', $w) . ' ORDER BY c.pesan_terakhir_at DESC LIMIT 60', $p)->fetchAll();
@@ -64,16 +71,16 @@ case 'pesan':   // isi 1 chat (terbaru dulu, halaman per 60), lengkap: media, ku
               q.id kutip_id, q.teks kutip_teks, q.jenis kutip_jenis, q.dari_tim kutip_dari_tim,
               (SELECT GROUP_CONCAT(CONCAT(r.emoji, "|", r.jid, "|", r.dari_web) SEPARATOR ";") FROM pesan_reaksi r WHERE r.pesan_id = p.id) reaksi,
               (SELECT COUNT(*) FROM pesan_versi v WHERE v.pesan_id = p.id) jumlah_versi,
-              (SELECT nama FROM kontak k WHERE k.nomor_id = p.nomor_id AND k.jid = p.pengirim_jid) pengirim_nama
+              (SELECT COALESCE(k.nama_simpan, k.push_name, k.nama_bisnis, k.nama) FROM kontak k WHERE k.nomor_id = p.nomor_id AND k.jid = p.pengirim_jid) pengirim_nama
             FROM pesan p LEFT JOIN media m ON m.pesan_id = p.id LEFT JOIN pesan q ON q.chat_id = p.chat_id AND q.wa_id = p.kutipan_wa_id
             WHERE p.chat_id = ? ' . ($sebelum ? 'AND p.id < ? ' : '') . 'ORDER BY p.waktu DESC, p.id DESC LIMIT 60', $sebelum ? [$chat, $sebelum] : [$chat])->fetchAll();
-    $info = q('SELECT c.id, c.nomor_id, n.label nomor_label, n.status nomor_status, c.jid, c.jenis, COALESCE(c.judul, k.nama) nama, c.waktu_balas_rata_detik, c.belum_dibalas_sejak
+    $info = q('SELECT c.id, c.nomor_id, n.label nomor_label, n.status nomor_status, c.jid, c.jenis, ' . NAMA_KOLOM . ', c.waktu_balas_rata_detik, c.belum_dibalas_sejak
                FROM chat c JOIN nomor n ON n.id = c.nomor_id LEFT JOIN kontak k ON k.nomor_id = c.nomor_id AND k.jid = c.jid WHERE c.id = ?', [$chat])->fetch();
     json_out(['ok' => true, 'chat' => $info, 'pesan' => array_reverse($r), 'sekarang' => date('Y-m-d H:i:s')]);
 
 case 'cari':   // kata / nomor di semua chat
     $s = trim((string)$in('q', '')); if (mb_strlen($s) < 2) json_out(['ok' => true, 'hasil' => []]);
-    $r = q('SELECT p.id, p.chat_id, p.nomor_id, n.label nomor_label, p.teks, p.waktu, p.dari_tim, COALESCE(c.judul, k.nama) nama, c.jid
+    $r = q('SELECT p.id, p.chat_id, p.nomor_id, n.label nomor_label, p.teks, p.waktu, p.dari_tim, ' . NAMA_KOLOM . ', c.jid
             FROM pesan p JOIN chat c ON c.id = p.chat_id JOIN nomor n ON n.id = p.nomor_id LEFT JOIN kontak k ON k.nomor_id = c.nomor_id AND k.jid = c.jid
             WHERE (c.jenis = "pribadi" OR c.simpan = 1) AND (p.teks LIKE ?' . (preg_replace('/\D/', '', $s) !== '' ? ' OR c.jid LIKE ?' : '') . ') ORDER BY p.waktu DESC LIMIT 80',
             preg_replace('/\D/', '', $s) !== '' ? ['%' . $s . '%', '%' . preg_replace('/\D/', '', $s) . '%'] : ['%' . $s . '%'])->fetchAll();

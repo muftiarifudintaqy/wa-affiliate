@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS nomor (
   id TINYINT UNSIGNED PRIMARY KEY,
   label VARCHAR(80) NOT NULL,
   jid VARCHAR(60) NULL,                       -- nomor yang tertaut (628xx@s.whatsapp.net)
+  foto_path VARCHAR(255) NULL, nama_wa VARCHAR(120) NULL, foto_at DATETIME NULL,   -- foto profil WA nomor ini (media/profil/<id>.jpg)
   status ENUM('belum','menghubungkan','perlu_scan','terhubung','terputus') NOT NULL DEFAULT 'belum',
   qr TEXT NULL, qr_at DATETIME NULL,
   terakhir_terhubung DATETIME NULL, terakhir_putus DATETIME NULL, alasan_putus VARCHAR(120) NULL,
@@ -145,3 +146,15 @@ CREATE TABLE IF NOT EXISTS notif_sistem (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO nomor (id, label) VALUES (1,'Aff 1'),(2,'Aff 2'),(3,'Aff 3'),(4,'Aff 4'),(5,'Aff 5'),(6,'Aff 6');
+
+-- [28 Okt] nama kontak seperti WhatsApp: nama tersimpan di buku kontak HP tim (nama_simpan) > pushName > nama bisnis > nomor; LID → nomor HP
+ALTER TABLE kontak ADD COLUMN nama_simpan VARCHAR(200) NULL AFTER nama, ADD COLUMN push_name VARCHAR(200) NULL AFTER nama_simpan, ADD COLUMN nama_bisnis VARCHAR(200) NULL AFTER push_name,
+  ADD COLUMN pn VARCHAR(32) NULL AFTER nama_bisnis, ADD COLUMN lid VARCHAR(40) NULL AFTER pn, ADD COLUMN diperbarui_at DATETIME NULL, ADD KEY k_pn (nomor_id, pn), ADD KEY k_lid (nomor_id, lid);
+ALTER TABLE chat ADD COLUMN pn VARCHAR(32) NULL AFTER jid, ADD COLUMN lid VARCHAR(40) NULL AFTER pn, ADD KEY k_pn (nomor_id, pn);
+CREATE TABLE IF NOT EXISTS lid_map (
+  nomor_id TINYINT UNSIGNED NOT NULL, lid VARCHAR(40) NOT NULL, pn VARCHAR(32) NOT NULL, sumber VARCHAR(20) NOT NULL, diperbarui_at DATETIME NOT NULL,
+  PRIMARY KEY (nomor_id, lid), KEY k_pn (nomor_id, pn)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- [28 Okt] foto profil kontak/grup (cache per chat, antrean pelan)
+ALTER TABLE chat ADD COLUMN foto_path VARCHAR(255) NULL, ADD COLUMN foto_at DATETIME NULL, ADD COLUMN foto_ada TINYINT(1) NULL, ADD KEY k_foto (foto_at);

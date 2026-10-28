@@ -11,6 +11,11 @@
   const tglPanjang = (t) => { const d = new Date(t.slice(0, 10) + 'T00:00:00'); return HARI[d.getDay()] + ', ' + d.getDate() + ' ' + BULAN[d.getMonth()] + ' ' + d.getFullYear(); };
   const jamDetik = (t) => t ? t.slice(11, 19) : '';
   const nomorHp = (jid) => { const n = String(jid || '').split('@')[0].split(':')[0]; return /^\d+$/.test(n) ? '+' + n : n; };
+  // [28 Okt] nama seperti WhatsApp; nomor kecil; LID tanpa nomor = "nomor tersembunyi" (bukan angka LID); foto kontak atau inisial
+  const namaChat = (c) => c.nama || (c.nomor ? '+' + c.nomor : (c.jenis === 'grup' ? 'Grup' : 'Nomor tersembunyi'));
+  const nomorChat = (c) => c.jenis === 'grup' ? 'Grup' : (c.nomor ? '+' + c.nomor : 'nomor tersembunyi');
+  const avaChat = (c) => { const n = namaChat(c), ini = ((n.replace(/^\+/, '').match(/[A-Za-z0-9]/g) || ['#']).slice(0, n.match(/\s/) ? 1 : 2).join('') + ((n.split(/\s+/)[1] || '').match(/[A-Za-z]/) || [''])[0]).toUpperCase().slice(0, 2);
+    return c.foto_ada == 1 ? `<img src="/media.php?kontak=${c.id}&v=${c.foto_v || 0}" alt="" loading="lazy">` : esc(ini); };
   const durasi = (s) => { if (s == null) return '–'; s = Number(s); return s < 60 ? s + ' dtk' : s < 3600 ? Math.round(s / 60) + ' mnt' : (s / 3600).toFixed(1).replace('.', ',') + ' jam'; };
   const toast = (t) => { const e = $('#toast'); e.textContent = t; e.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => e.hidden = true, 3500); };
 
@@ -41,15 +46,41 @@
     S.nomor = j.nomor; renderRel();
     if (S.hal === 'hubungkan') renderHubungkan();
   }
+  // label pendek "Aff 1" untuk sidebar, inisial dari nama di belakang tanda "-" (mis. "Aff 1 - Natasya" → N)
+  const labelPendek = (l) => String(l || '').split(/\s+[-–—]\s+/)[0].slice(0, 10);
+  const inisial = (n) => { const b = String(n.label || '').split(/\s+[-–—]\s+/)[1]; return b ? b.trim()[0].toUpperCase() : 'A' + ((String(n.label).match(/\d+/) || [n.id])[0]); };
+  const foto = (n) => n.ada_foto == 1 ? `<img src="/media.php?profil=${n.id}&v=${n.foto_v || 0}" alt="">` : esc(inisial(n));
+  const STATUS = { terhubung: 'Terhubung', terputus: 'Terputus', perlu_scan: 'Perlu scan', menghubungkan: 'Menghubungkan', belum: 'Belum ditautkan' };
   function renderRel() {
-    const belum = {}; S.chats.forEach(c => { if (Number(c.belum_dibalas) > 0) belum[c.nomor_id] = (belum[c.nomor_id] || 0) + 1; });
-    $('#relNomor').innerHTML = `<button class="rel-n ${S.nomorAktif === 'semua' ? 'on' : ''}" data-n="semua" title="Semua nomor">Semua</button>` +
-      S.nomor.map(n => `<button class="rel-n ${String(S.nomorAktif) === String(n.id) ? 'on' : ''}" data-n="${n.id}" title="${esc(n.label)} · ${esc(n.status)}">${esc((n.label.match(/\d+/) || [n.id])[0])}<i class="${esc(n.status)}"></i>${S.nomorAktif === 'semua' && belum[n.id] ? '<b>' + belum[n.id] + '</b>' : ''}</button>`).join('');
+    $('#relNomor').innerHTML = `<button class="rel-n ${S.nomorAktif === 'semua' ? 'on' : ''}" data-n="semua" title="Semua nomor"><span class="foto">∑</span><span class="lbl">Semua</span></button>` +
+      S.nomor.map(n => `<button class="rel-n ${String(S.nomorAktif) === String(n.id) ? 'on' : ''}" data-n="${n.id}" title="${esc(n.label)} · ${esc(STATUS[n.status] || n.status)}${n.jid ? ' · ' + esc(nomorHp(n.jid)) : ''}">
+        <span class="foto">${foto(n)}</span><i class="${esc(n.status)}"></i>${Number(n.chat_belum_dibalas) > 0 ? '<b>' + n.chat_belum_dibalas + '</b>' : ''}<span class="lbl">${esc(labelPendek(n.label))}</span></button>`).join('');
     const n = S.nomor.find(x => String(x.id) === String(S.nomorAktif));
     $('#judulNomor').textContent = n ? n.label : 'Semua nomor';
-    $('#statusNomor').textContent = n ? ({ terhubung: 'terhubung', perlu_scan: 'perlu scan QR', terputus: 'terputus', belum: 'belum ditautkan', menghubungkan: 'menghubungkan…' })[n.status] || n.status : '';
+    $('#statusNomor').textContent = n ? (STATUS[n.status] || n.status) : '';
+    renderKartu();
   }
-  $('#relNomor').addEventListener('click', (e) => { const b = e.target.closest('.rel-n'); if (!b) return; S.nomorAktif = b.dataset.n; renderRel(); muatChats(); gantiHal('inbox'); });
+  // pita kartu: "Semua" + Aff 1–6 (grid di desktop, geser horizontal di HP); klik = filter chat
+  function renderKartu() {
+    const box = $('#kartuGrid'); if (!box) return;
+    const terakhir = (n) => { if (!n.terakhir) return null; const [t, tim, nama, cup] = n.terakhir.split('\t'); return { t, tim: tim === '1', nama, cup }; };
+    const jamPendek = (t) => { if (!t) return ''; const hariIni = t.slice(0, 10) === new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10); return hariIni ? t.slice(11, 16) : t.slice(8, 10) + '/' + t.slice(5, 7) + ' ' + t.slice(11, 16); };
+    const tot = S.nomor.reduce((a, n) => { a.on += n.status === 'terhubung' ? 1 : 0; a.belum += Number(n.chat_belum_dibalas) || 0; a.chat += Number(n.jumlah_chat) || 0; return a; }, { on: 0, belum: 0, chat: 0 });
+    box.innerHTML = `<button class="kartu semua ${S.nomorAktif === 'semua' ? 'on' : ''}" data-n="semua"><div><div class="k-judul">Semua nomor</div><div class="k-sub">Gabungan chat ${S.nomor.length} nomor affiliate</div></div>
+        <div class="k-angka"><div><b>${tot.on}/${S.nomor.length}</b>terhubung</div><div><b>${tot.belum}</b>belum dibalas</div><div><b>${tot.chat.toLocaleString('id-ID')}</b>chat</div><div><b>${S.nomor.filter(n => n.status === 'perlu_scan' || n.status === 'terputus').length}</b>perlu dicek</div></div></button>` +
+      S.nomor.map(n => { const z = terakhir(n); return `<button class="kartu ${String(S.nomorAktif) === String(n.id) ? 'on' : ''}" data-n="${n.id}" title="${esc(n.label)}">
+        <span class="foto">${foto(n)}</span>
+        <span class="k-nama"><span>${esc(n.label)}</span></span>
+        <span class="k-no">${n.jid ? esc(nomorHp(n.jid)) : 'Belum ditautkan'}${n.nama_wa ? ' · ' + esc(n.nama_wa) : ''}</span>
+        <span class="k-bawah"><span class="st ${esc(n.status)}">${esc(STATUS[n.status] || n.status)}</span>${Number(n.chat_belum_dibalas) > 0 ? `<span class="lencana" title="chat belum dibalas">${n.chat_belum_dibalas}</span>` : ''}</span>
+        <span class="k-bawah"><span class="k-pesan">${z ? (z.tim ? 'Tim → ' : '') + '<b>' + esc(z.nama && z.nama.includes('@') ? nomorHp(z.nama) : z.nama) + '</b>: ' + esc(z.cup || '') : 'Belum ada pesan'}</span><span class="k-jam">${z ? jamPendek(z.t) : ''}</span></span></button>`; }).join('');
+  }
+  $('#kartuGrid').addEventListener('click', (e) => { const b = e.target.closest('.kartu'); if (!b) return; S.nomorAktif = b.dataset.n; S.jejakChats = ''; renderRel(); muatChats(); });
+  const band = $('#band'); let lipat = false; try { lipat = localStorage.getItem('bandLipat') === '1'; } catch (e) {}
+  const aturLipat = () => { band.classList.toggle('lipat', lipat); $('#bandLipat').textContent = lipat ? 'Lengkap' : 'Ringkas'; $('#bandLipat').setAttribute('aria-expanded', String(!lipat)); };
+  $('#bandLipat').addEventListener('click', () => { lipat = !lipat; try { localStorage.setItem('bandLipat', lipat ? '1' : '0'); } catch (e) {} aturLipat(); });
+  aturLipat();
+  $('#relNomor').addEventListener('click', (e) => { const b = e.target.closest('.rel-n'); if (!b) return; S.nomorAktif = b.dataset.n; S.jejakChats = ''; renderRel(); muatChats(); gantiHal('inbox'); });
   $$('.rel-btn[data-hal]').forEach(b => b.addEventListener('click', () => gantiHal(b.dataset.hal)));
   function gantiHal(h) {
     S.hal = h; $$('.rel-btn[data-hal]').forEach(b => b.classList.toggle('on', b.dataset.hal === h));
@@ -68,11 +99,11 @@
     const ul = $('#daftarChat');
     if (!S.chats.length) { ul.innerHTML = '<li class="kosong-obrolan kecil">Belum ada chat. Tautkan nomor di halaman Hubungkan (🔗).</li>'; return; }
     ul.innerHTML = S.chats.map(c => {
-      const nama = c.nama || nomorHp(c.jid), inisial = (nama.replace(/[^A-Za-z0-9]/g, '')[0] || '#').toUpperCase();
+      const nama = namaChat(c);
       const hariIni = c.pesan_terakhir_at && c.pesan_terakhir_at.slice(0, 10) === new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
       return `<li class="chat-i ${S.chat && S.chat.id == c.id ? 'on' : ''}" data-id="${c.id}">
-        <div class="ava ${c.jenis === 'grup' ? 'grup' : ''}">${esc(inisial)}</div>
-        <div style="min-width:0"><div class="chat-nama">${esc(nama)}</div><div class="chat-cup">${c.cuplikan_dari_tim == 1 ? '↪ ' : ''}${esc(c.cuplikan || '')}</div></div>
+        <div class="ava ${c.jenis === 'grup' ? 'grup' : ''}">${avaChat(c)}</div>
+        <div style="min-width:0"><div class="chat-nama" title="${esc(c.nama_simpan ? 'Disimpan sebagai: ' + c.nama_simpan : (c.push_name ? 'Nama WA: ' + c.push_name : ''))}">${esc(nama)}</div><div class="chat-no">${esc(nomorChat(c))}</div><div class="chat-cup">${c.cuplikan_dari_tim == 1 ? '↪ ' : ''}${esc(c.cuplikan || '')}</div></div>
         <div class="chat-kanan"><span class="chat-jam">${c.pesan_terakhir_at ? (hariIni ? c.pesan_terakhir_at.slice(11, 16) : c.pesan_terakhir_at.slice(8, 10) + '/' + c.pesan_terakhir_at.slice(5, 7)) : ''}</span>
           ${S.nomorAktif === 'semua' ? `<span class="tag-n">${esc(c.nomor_label)}</span>` : ''}${Number(c.belum_dibalas) > 0 ? `<span class="lencana" title="belum dibalas sejak ${esc(c.belum_dibalas_sejak)}">${c.belum_dibalas}</span>` : ''}</div></li>`;
     }).join('');
@@ -88,8 +119,8 @@
       if (s.length < 2) { box.hidden = true; $('#daftarChat').hidden = false; return; }
       const [j, c] = await Promise.all([api('cari', { q: s }), api('chats', { nomor: S.nomorAktif, cari: s })]);
       const re = new RegExp('(' + s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
-      box.innerHTML = (c.chats || []).map(x => `<div class="hasil-i" data-chat="${x.id}"><b>${esc(x.nama || nomorHp(x.jid))}</b> <span class="tag-n">${esc(x.nomor_label)}</span><div class="kecil">${esc(nomorHp(x.jid))}</div></div>`).join('') +
-        (j.hasil || []).map(x => `<div class="hasil-i" data-chat="${x.chat_id}"><b>${esc(x.nama || nomorHp(x.jid))}</b> <span class="tag-n">${esc(x.nomor_label)}</span> <span class="kecil mono">${esc(x.waktu)}</span><div class="kecil">${x.dari_tim == 1 ? 'Tim: ' : ''}${esc(x.teks || '').replace(re, '<mark>$1</mark>')}</div></div>`).join('') || '<div class="hasil-i kecil">Tidak ada hasil.</div>';
+      box.innerHTML = (c.chats || []).map(x => `<div class="hasil-i" data-chat="${x.id}"><b>${esc(namaChat(x))}</b> <span class="tag-n">${esc(x.nomor_label)}</span><div class="kecil">${esc(nomorChat(x))}${x.nama_simpan ? ' · disimpan sebagai ' + esc(x.nama_simpan) : ''}${x.push_name ? ' · nama WA ' + esc(x.push_name) : ''}</div></div>`).join('') +
+        (j.hasil || []).map(x => `<div class="hasil-i" data-chat="${x.chat_id}"><b>${esc(namaChat(x))}</b> <span class="tag-n">${esc(x.nomor_label)}</span> <span class="kecil mono">${esc(x.waktu)}</span><div class="kecil">${x.dari_tim == 1 ? 'Tim: ' : ''}${esc(x.teks || '').replace(re, '<mark>$1</mark>')}</div></div>`).join('') || '<div class="hasil-i kecil">Tidak ada hasil.</div>';
       box.hidden = false; $('#daftarChat').hidden = true;
     }, 350);
   });
@@ -115,8 +146,8 @@
     if (pertama === true || !S.pesan.length) S.pesan = j.pesan;
     else { const lama = S.pesan.filter(p => p.id < j.pesan[0].id); S.pesan = lama.concat(j.pesan); }
     S.palingLama = S.pesan.length ? S.pesan[0].id : 0;
-    $('#namaChat').textContent = j.chat.nama || nomorHp(j.chat.jid);
-    $('#infoChat').innerHTML = `${esc(nomorHp(j.chat.jid))} · <span class="tag-n">${esc(j.chat.nomor_label)}</span> · rata-rata balas ${durasi(j.chat.waktu_balas_rata_detik)}${j.chat.belum_dibalas_sejak ? ` · <b style="color:var(--oranye)">belum dibalas sejak ${esc(j.chat.belum_dibalas_sejak.slice(11, 19))}</b>` : ''}${j.chat.nomor_status !== 'terhubung' ? ' · <b style="color:var(--oranye)">nomor tidak terhubung</b>' : ''}`;
+    $('#namaChat').textContent = namaChat(j.chat); $('#avaChat').innerHTML = avaChat(j.chat); $('#avaChat').classList.toggle('grup', j.chat.jenis === 'grup');
+    $('#infoChat').innerHTML = `${esc(nomorChat(j.chat))}${j.chat.jenis !== 'grup' ? ` · Disimpan sebagai: <b>${esc(j.chat.nama_simpan || '–')}</b> · Nama WA: <b>${esc(j.chat.push_name || '–')}</b>` : ''} · <span class="tag-n">${esc(j.chat.nomor_label)}</span> · rata-rata balas ${durasi(j.chat.waktu_balas_rata_detik)}${j.chat.belum_dibalas_sejak ? ` · <b style="color:var(--oranye)">belum dibalas sejak ${esc(j.chat.belum_dibalas_sejak.slice(11, 19))}</b>` : ''}${j.chat.nomor_status !== 'terhubung' ? ' · <b style="color:var(--oranye)">nomor tidak terhubung</b>' : ''}`;
     renderPesan();
   }
   function centang(p) {
@@ -263,10 +294,10 @@
   const grupTerbuka = {};
   async function renderHubungkan() {
     const box = $('#halHubungkan');
-    if (!box.dataset.siap) { box.dataset.siap = 1; box.innerHTML = '<h2>Hubungkan nomor</h2><p>Di HP tim: WhatsApp → Perangkat tertaut → Tautkan perangkat, lalu pindai QR. HP tetap bisa dipakai seperti biasa. Riwayat chat lama ikut ditarik penuh setelah tertaut.</p><div class="kartu-n" id="kartuN"></div>'; }
+    if (!box.dataset.siap) { box.dataset.siap = 1; box.innerHTML = '<h2>Hubungkan nomor</h2><p>Label tiap nomor bisa diubah langsung di kotak nama (contoh: Aff 1 - Natasya), tersimpan otomatis. Di HP tim: WhatsApp → Perangkat tertaut → Tautkan perangkat, lalu pindai QR. HP tetap bisa dipakai seperti biasa. Riwayat chat lama ikut ditarik penuh setelah tertaut.</p><div class="kartu-n" id="kartuN"></div>'; }
     const wadah = $('#kartuN'), fokus = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.label : null;
     wadah.innerHTML = S.nomor.map(n => `<div class="kn" data-n="${n.id}">
-      <div class="kn-atas"><input value="${esc(n.label)}" data-label="${n.id}" aria-label="Label nomor ${n.id}"><span class="st ${esc(n.status)}">${({ terhubung: 'terhubung', perlu_scan: 'perlu scan', terputus: 'terputus', belum: 'belum ditautkan', menghubungkan: 'menghubungkan' })[n.status] || n.status}</span></div>
+      <div class="kn-atas"><span class="foto">${foto(n)}</span><input value="${esc(n.label)}" data-label="${n.id}" aria-label="Label nomor ${n.id}" title="Ubah label, mis. Aff 1 - Natasya"><span class="st ${esc(n.status)}">${esc(STATUS[n.status] || n.status)}</span></div>
       ${n.status === 'perlu_scan' && n.qr ? `<div class="qr" data-qr="${esc(n.qr)}"></div><div class="kecil">QR berganti otomatis tiap ±20 detik.</div>` : ''}
       <dl><dt>Nomor</dt><dd>${esc(n.jid ? nomorHp(n.jid) : '–')}</dd><dt>Terhubung</dt><dd>${esc(n.terakhir_terhubung || '–')}</dd><dt>Putus</dt><dd>${esc(n.terakhir_putus || '–')}${n.alasan_putus ? ' (' + esc(n.alasan_putus) + ')' : ''}</dd>
         <dt>Riwayat</dt><dd>${n.riwayat_progres != null ? esc(n.riwayat_progres) + '%' : '–'}</dd><dt>Pesan</dt><dd>${Number(n.jumlah_pesan).toLocaleString('id-ID')} · ${Number(n.jumlah_chat).toLocaleString('id-ID')} chat</dd>

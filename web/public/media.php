@@ -2,6 +2,18 @@
 /* Inbox Affiliate — media pesan (gambar, video, voice note, dokumen, stiker). Wajib login; file di luar folder web; dicatat. */
 require __DIR__ . '/../inc/boot.php';
 if (!user()) { http_response_code(401); exit('Silakan masuk.'); }
+if (isset($_GET['profil'])) {   // foto profil WA nomor tim (kartu & sidebar)
+    $n = q('SELECT foto_path FROM nomor WHERE id = ?', [(int)$_GET['profil']])->fetch();
+    $akar = realpath((env()['DATA_DIR'] ?? '/var/lib/wa-affiliate') . '/media'); $f = $n && $n['foto_path'] ? realpath($akar . '/' . $n['foto_path']) : false;
+    if (!$f || strpos($f, $akar . '/') !== 0) { http_response_code(404); exit; }
+    session_write_close(); header('Content-Type: image/jpeg'); header('Cache-Control: private, max-age=86400'); header('Content-Length: ' . filesize($f)); readfile($f); exit;
+}
+if (isset($_GET['kontak'])) {   // foto profil kontak / grup (cache per chat)
+    $n = q('SELECT foto_path FROM chat WHERE id = ?', [(int)$_GET['kontak']])->fetch();
+    $akar = realpath((env()['DATA_DIR'] ?? '/var/lib/wa-affiliate') . '/media'); $f = $n && $n['foto_path'] ? realpath($akar . '/' . $n['foto_path']) : false;
+    if (!$f || strpos($f, $akar . '/') !== 0) { http_response_code(404); exit; }
+    session_write_close(); header('Content-Type: image/jpeg'); header('Cache-Control: private, max-age=86400'); header('Content-Length: ' . filesize($f)); readfile($f); exit;
+}
 $m = q('SELECT m.*, p.nomor_id, p.chat_id FROM media m JOIN pesan p ON p.id = m.pesan_id WHERE m.id = ?', [(int)($_GET['id'] ?? 0)])->fetch();
 if (!$m || $m['status'] !== 'ok') { http_response_code(404); exit('Media belum tersedia.'); }
 $akar = realpath((env()['DATA_DIR'] ?? '/var/lib/wa-affiliate') . '/media');
