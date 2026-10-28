@@ -53,13 +53,15 @@ case 'chats':
     $w = ['(c.jenis = "pribadi" OR c.simpan = 1)', 'c.pesan_terakhir_at IS NOT NULL']; $p = [];
     if ($nomor !== 'semua') { $w[] = 'c.nomor_id = ?'; $p[] = (int)$nomor; }
     if ($sebelum !== '') { $w[] = 'c.pesan_terakhir_at < ?'; $p[] = $sebelum; }
+    $belum = !empty($_GET['belum']);   // [28 Okt] filter: pesan terakhir dari kontak & belum ada balasan tim sesudahnya
+    if ($belum) $w[] = 'c.belum_dibalas_sejak IS NOT NULL';
     if ($cari !== '') { $angka = preg_replace('/\D/', '', $cari); $l = '%' . $cari . '%';   // nama tersimpan, pushName, nama bisnis, judul grup, nomor
         $w[] = '(c.judul LIKE ? OR k.nama LIKE ? OR k.nama_simpan LIKE ? OR k.push_name LIKE ? OR k.nama_bisnis LIKE ?' . ($angka !== '' ? ' OR c.jid LIKE ? OR c.pn LIKE ?' : '') . ')';
         array_push($p, $l, $l, $l, $l, $l); if ($angka !== '') array_push($p, '%' . $angka . '%', '%' . $angka . '%'); }
     $r = q('SELECT c.id, c.nomor_id, n.label nomor_label, c.jid, c.jenis, ' . NAMA_KOLOM . ', c.cuplikan, c.cuplikan_dari_tim, c.pesan_terakhir_at, c.belum_dibalas_sejak, c.waktu_balas_rata_detik,
               IF(c.belum_dibalas_sejak IS NULL, 0, (SELECT COUNT(*) FROM pesan x WHERE x.chat_id = c.id AND x.dari_tim = 0 AND x.waktu >= c.belum_dibalas_sejak)) belum_dibalas
             FROM chat c JOIN nomor n ON n.id = c.nomor_id LEFT JOIN kontak k ON k.nomor_id = c.nomor_id AND k.jid = c.jid
-            WHERE ' . implode(' AND ', $w) . ' ORDER BY c.pesan_terakhir_at DESC LIMIT 60', $p)->fetchAll();
+            WHERE ' . implode(' AND ', $w) . ' ORDER BY c.pesan_terakhir_at DESC LIMIT ' . ($belum ? 300 : 60), $p)->fetchAll();
     json_out(['ok' => true, 'chats' => $r]);
 
 case 'pesan':   // isi 1 chat (terbaru dulu, halaman per 60), lengkap: media, kutipan, reaksi, status, versi, tanda dari web

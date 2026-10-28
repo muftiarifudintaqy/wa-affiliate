@@ -17,7 +17,7 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
 <link rel="icon" href="/img/prepare-bulat.png"><meta name="theme-color" content="#4A55A2">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/app.css?v=6">
+<link rel="stylesheet" href="/app.css?v=7">
 </head><body>
 <?php if (!$u): ?>
 <main class="masuk">
@@ -46,14 +46,12 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
     </div>
   </nav>
   <section id="halInbox" class="hal inbox">
-    <div class="band" id="band">
-      <div class="band-atas"><h2>Nomor affiliate</h2><button class="band-lipat" id="bandLipat" aria-expanded="true">Ringkas</button></div>
-      <div class="kartu-grid" id="kartuGrid" aria-label="Pilih nomor"></div>
-    </div>
     <div class="inbox-isi">
     <aside class="daftar">
       <header class="daftar-atas"><h2 id="judulNomor">Semua nomor</h2><span id="statusNomor" class="kecil"></span></header>
-      <div class="cari"><input id="cari" type="search" placeholder="Cari nama, nomor, atau isi pesan" aria-label="Cari"></div>
+      <div class="ringkas" id="ringkas" aria-label="Belum dibalas per akun"></div>
+      <div class="cari"><input id="cari" type="search" placeholder="Cari nama, nomor, atau isi pesan" aria-label="Cari">
+        <button type="button" class="saring" id="saringBelum" aria-pressed="false" title="Tampilkan hanya chat yang belum dibalas">Belum dibalas</button></div>
       <div id="hasilCari" class="hasil-cari" hidden></div>
       <ul id="daftarChat" class="daftar-chat" aria-label="Daftar chat"></ul>
     </aside>
@@ -87,6 +85,6 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
 <div class="modal" id="modal" hidden><div class="modal-kartu"><button class="modal-tutup" id="modalTutup" aria-label="Tutup">✕</button><div id="modalIsi"></div></div></div>
 <div class="toast" id="toast" role="status" hidden></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="/app.js?v=4"></script>
+<script src="/app.js?v=5"></script>
 <?php endif; ?>
 </body></html>

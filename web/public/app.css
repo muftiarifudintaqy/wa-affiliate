@@ -77,6 +77,13 @@ h1,h2,h3{font-family:var(--judul);letter-spacing:-.01em}
 .band.lipat .kartu .k-no,.band.lipat .kartu .k-bawah,.band.lipat .kartu.semua .k-sub,.band.lipat .kartu.semua .k-angka{display:none}
 .band.lipat .kartu.semua{grid-row:auto;grid-template-columns:1fr}.band.lipat .kartu.semua .k-judul{font-size:13px}
 
+.ringkas{display:flex;flex-wrap:wrap;align-items:center;gap:2px 4px;padding:0 14px 10px;font-size:12.5px;color:var(--redup)}
+.ringkas .r-judul{font-weight:600;color:var(--tinta)}.ringkas .r-sep{color:var(--aksen)}
+.ringkas button{border:0;background:none;padding:2px 6px;border-radius:8px;color:var(--redup);font:inherit;transition:background .12s}.ringkas button:hover{background:var(--latar)}.ringkas button.on{background:var(--aksen-muda);color:var(--gelap)}
+.ringkas b{font-weight:700;color:var(--tinta);font-variant-numeric:tabular-nums}.ringkas b.merah{color:var(--merah)}
+.cari{display:flex;gap:8px;align-items:center}
+.saring{flex:none;border:1px solid var(--aksen);background:#fff;color:var(--gelap);border-radius:999px;padding:7px 12px;font:600 12.5px var(--sans);white-space:nowrap;transition:background .15s,color .15s}
+.saring:hover{background:var(--aksen-muda)}.saring.on{background:var(--merah);border-color:var(--merah);color:#fff}
 .inbox-isi{flex:1;min-height:0;display:grid;grid-template-columns:minmax(300px,380px) 1fr}
 .daftar{background:var(--panel);border-right:1px solid var(--garis);display:flex;flex-direction:column;min-height:0}
 .daftar-atas{padding:14px 16px 8px;display:flex;align-items:baseline;gap:8px;justify-content:space-between}

@@ -53,13 +53,26 @@
   const STATUS = { terhubung: 'Terhubung', terputus: 'Terputus', perlu_scan: 'Perlu scan', menghubungkan: 'Menghubungkan', belum: 'Belum ditautkan' };
   function renderRel() {
     $('#relNomor').innerHTML = `<button class="rel-n ${S.nomorAktif === 'semua' ? 'on' : ''}" data-n="semua" title="Semua nomor"><span class="foto">∑</span><span class="lbl">Semua</span></button>` +
-      S.nomor.map(n => `<button class="rel-n ${String(S.nomorAktif) === String(n.id) ? 'on' : ''}" data-n="${n.id}" title="${esc(n.label)} · ${esc(STATUS[n.status] || n.status)}${n.jid ? ' · ' + esc(nomorHp(n.jid)) : ''}">
+      S.nomor.map(n => `<button class="rel-n ${String(S.nomorAktif) === String(n.id) ? 'on' : ''}" data-n="${n.id}" title="${esc(n.label)}${n.nama_wa ? ' (' + esc(n.nama_wa) + ')' : ''} · ${esc(STATUS[n.status] || n.status)}${n.jid ? ' · ' + esc(nomorHp(n.jid)) : ''} · belum dibalas ${Number(n.chat_belum_dibalas) || 0}">
         <span class="foto">${foto(n)}</span><i class="${esc(n.status)}"></i>${Number(n.chat_belum_dibalas) > 0 ? '<b>' + n.chat_belum_dibalas + '</b>' : ''}<span class="lbl">${esc(labelPendek(n.label))}</span></button>`).join('');
     const n = S.nomor.find(x => String(x.id) === String(S.nomorAktif));
-    $('#judulNomor').textContent = n ? n.label : 'Semua nomor';
+    const judulAkun = (n) => { const l = String(n.label || ''), dasar = labelPendek(l), sisa = l.split(/\s+[-–—]\s+/).slice(1).join(' - ') || n.nama_wa || (n.jid ? nomorHp(n.jid) : 'belum ditautkan'); return dasar + ' — ' + sisa; };
+    $('#judulNomor').textContent = n ? judulAkun(n) : 'Semua nomor';
+    renderRingkas(judulAkun);
     $('#statusNomor').textContent = n ? (STATUS[n.status] || n.status) : '';
     renderKartu();
   }
+  // baris ringkas di atas daftar chat: belum dibalas total + per akun (klik = pilih akun)
+  function renderRingkas(judulAkun) {
+    const box = $('#ringkas'); if (!box) return;
+    const tot = S.nomor.reduce((a, n) => a + (Number(n.chat_belum_dibalas) || 0), 0), angka = (x) => `<b class="${x > 0 ? 'merah' : ''}">${x}</b>`;
+    box.innerHTML = `<span class="r-judul">Belum dibalas:</span> <button type="button" data-n="semua" class="${S.nomorAktif === 'semua' ? 'on' : ''}" title="Semua akun">${angka(tot)}</button>` +
+      S.nomor.map(n => `<span class="r-sep">·</span><button type="button" data-n="${n.id}" class="${String(S.nomorAktif) === String(n.id) ? 'on' : ''}" title="${esc(judulAkun(n))}">${esc(labelPendek(n.label).replace(/\s+/g, ''))} ${angka(Number(n.chat_belum_dibalas) || 0)}</button>`).join('');
+  }
+  $('#ringkas').addEventListener('click', (e) => { const b = e.target.closest('button[data-n]'); if (!b) return; S.nomorAktif = b.dataset.n; S.jejakChats = ''; renderRel(); muatChats(); });
+  // filter "Belum dibalas" (akun terpilih atau Semua)
+  S.belum = false;
+  $('#saringBelum').addEventListener('click', () => { S.belum = !S.belum; $('#saringBelum').setAttribute('aria-pressed', String(S.belum)); $('#saringBelum').classList.toggle('on', S.belum); S.jejakChats = ''; muatChats(); });
   // pita kartu: "Semua" + Aff 1–6 (grid di desktop, geser horizontal di HP); klik = filter chat
   function renderKartu() {
     const box = $('#kartuGrid'); if (!box) return;
@@ -75,11 +88,7 @@
         <span class="k-bawah"><span class="st ${esc(n.status)}">${esc(STATUS[n.status] || n.status)}</span>${Number(n.chat_belum_dibalas) > 0 ? `<span class="lencana" title="chat belum dibalas">${n.chat_belum_dibalas}</span>` : ''}</span>
         <span class="k-bawah"><span class="k-pesan">${z ? (z.tim ? 'Tim → ' : '') + '<b>' + esc(z.nama && z.nama.includes('@') ? nomorHp(z.nama) : z.nama) + '</b>: ' + esc(z.cup || '') : 'Belum ada pesan'}</span><span class="k-jam">${z ? jamPendek(z.t) : ''}</span></span></button>`; }).join('');
   }
-  $('#kartuGrid').addEventListener('click', (e) => { const b = e.target.closest('.kartu'); if (!b) return; S.nomorAktif = b.dataset.n; S.jejakChats = ''; renderRel(); muatChats(); });
-  const band = $('#band'); let lipat = false; try { lipat = localStorage.getItem('bandLipat') === '1'; } catch (e) {}
-  const aturLipat = () => { band.classList.toggle('lipat', lipat); $('#bandLipat').textContent = lipat ? 'Lengkap' : 'Ringkas'; $('#bandLipat').setAttribute('aria-expanded', String(!lipat)); };
-  $('#bandLipat').addEventListener('click', () => { lipat = !lipat; try { localStorage.setItem('bandLipat', lipat ? '1' : '0'); } catch (e) {} aturLipat(); });
-  aturLipat();
+
   $('#relNomor').addEventListener('click', (e) => { const b = e.target.closest('.rel-n'); if (!b) return; S.nomorAktif = b.dataset.n; S.jejakChats = ''; renderRel(); muatChats(); gantiHal('inbox'); });
   $$('.rel-btn[data-hal]').forEach(b => b.addEventListener('click', () => gantiHal(b.dataset.hal)));
   function gantiHal(h) {
@@ -90,14 +99,14 @@
 
   // ---------------------------------------------------------------- daftar chat
   async function muatChats() {
-    const j = await api('chats', { nomor: S.nomorAktif }); if (!j.ok) return;
-    const jejak = S.nomorAktif + JSON.stringify(j.chats);
+    const j = await api('chats', S.belum ? { nomor: S.nomorAktif, belum: 1 } : { nomor: S.nomorAktif }); if (!j.ok) return;
+    const jejak = S.nomorAktif + (S.belum ? '|b' : '') + JSON.stringify(j.chats);
     if (jejak === S.jejakChats) return;            // tidak berubah → jangan gambar ulang (hover & klik tidak terganggu)
     S.jejakChats = jejak; S.chats = j.chats; renderChats(); renderRel();
   }
   function renderChats() {
     const ul = $('#daftarChat');
-    if (!S.chats.length) { ul.innerHTML = '<li class="kosong-obrolan kecil">Belum ada chat. Tautkan nomor di halaman Hubungkan (🔗).</li>'; return; }
+    if (!S.chats.length) { ul.innerHTML = S.belum ? '<li class="kosong-obrolan kecil">Semua chat sudah dibalas.</li>' : '<li class="kosong-obrolan kecil">Belum ada chat. Tautkan nomor di halaman Hubungkan (🔗).</li>'; return; }
     ul.innerHTML = S.chats.map(c => {
       const nama = namaChat(c);
       const hariIni = c.pesan_terakhir_at && c.pesan_terakhir_at.slice(0, 10) === new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
