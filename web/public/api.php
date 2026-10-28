@@ -40,7 +40,7 @@ switch ($aksi) {
 case 'nomor':   // status 6 nomor + laporan riwayat (pesan paling lama & jumlah pesan)
     $r = q("SELECT n.id, n.label, n.jid, n.nama_wa, n.foto_path IS NOT NULL ada_foto, UNIX_TIMESTAMP(n.foto_at) foto_v, n.status, n.qr, n.qr_at, n.riwayat_progres, n.terakhir_terhubung, n.terakhir_putus, n.alasan_putus,
               (SELECT COUNT(*) FROM chat c WHERE c.nomor_id = n.id AND c.jenis = 'pribadi' AND c.belum_dibalas_sejak IS NOT NULL) chat_belum_dibalas,
-              (SELECT CONCAT_WS('\t', c.pesan_terakhir_at, c.cuplikan_dari_tim, COALESCE(c.judul, k.nama, c.jid), c.cuplikan) FROM chat c LEFT JOIN kontak k ON k.nomor_id = c.nomor_id AND k.jid = c.jid
+              (SELECT CONCAT_WS('\t', c.pesan_terakhir_at, c.cuplikan_dari_tim, COALESCE(IF(c.jenis = 'grup', c.judul, NULL), k.nama_simpan, k.push_name, k.nama_bisnis, k.nama, CONCAT('+', c.pn), c.jid), c.cuplikan) FROM chat c LEFT JOIN kontak k ON k.nomor_id = c.nomor_id AND k.jid = c.jid
                  WHERE c.nomor_id = n.id AND (c.jenis = 'pribadi' OR c.simpan = 1) AND c.pesan_terakhir_at IS NOT NULL ORDER BY c.pesan_terakhir_at DESC LIMIT 1) terakhir,
               (SELECT COUNT(*) FROM pesan p WHERE p.nomor_id = n.id) jumlah_pesan, (SELECT MIN(waktu) FROM pesan p WHERE p.nomor_id = n.id) pesan_terlama,
               (SELECT COUNT(*) FROM chat c WHERE c.nomor_id = n.id AND c.jenis = 'pribadi') jumlah_chat,

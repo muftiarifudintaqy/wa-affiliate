@@ -300,7 +300,15 @@ async function mulai(id) {
         setTimeout(() => ambilFoto(id).catch(() => {}), 5000);
         setTimeout(async () => {   // daftar kontak penuh dari HP (nama tersimpan) + peta LID + pushName chat lama
           try { await muatPetaLid(id); } catch (e) { log(`[${id}] peta LID`, e.message); }
-          try { await sock.resyncAppState(['critical_unblock_low', 'regular_high', 'regular_low', 'critical_block', 'regular'], true); log(`[${id}] sinkron kontak HP selesai`); } catch (e) { log(`[${id}] sinkron kontak`, e.message); }
+          try {
+            // sekali per nomor: minta SALINAN PENUH buku kontak HP (nama tersimpan) — penanda versi dikosongkan supaya WhatsApp mengirim snapshot lengkap
+            const tanda = path.join(DATA, 'sesi', String(id), 'kontak-penuh.selesai');
+            if (!fs.existsSync(tanda)) { await sock.authState.keys.set({ 'app-state-sync-version': { critical_unblock_low: null } }); log(`[${id}] minta daftar kontak penuh`); }
+            await sock.resyncAppState(['critical_unblock_low', 'regular_high', 'regular_low', 'critical_block', 'regular'], true);
+            if (!fs.existsSync(tanda)) fs.writeFileSync(tanda, jam());
+            const n = (await q('SELECT SUM(nama_simpan IS NOT NULL) n FROM kontak WHERE nomor_id = ?', [id]))[0].n;
+            log(`[${id}] sinkron kontak HP selesai (${n || 0} kontak bernama tersimpan)`);
+          } catch (e) { log(`[${id}] sinkron kontak`, e.message); }
           try { await isiPushNameLama(id); } catch (e) { log(`[${id}] pushName lama`, e.message); }
         }, 8000);
       }
@@ -367,7 +375,9 @@ async function mulai(id) {
     for (const { key, reaction } of rs) { try { const ch = await chatId(id, jidChat(key, id)); await simpanReaksi(id, ch.id, { key, text: reaction.text }, reaction.key || key, jam(), {}); } catch (e) { /* lewati */ } }
   });
   // nama kontak realtime: buku kontak HP tim (name), pushName (notify), nama bisnis (verifiedName)
-  sock.ev.on('contacts.upsert', async (ks) => { for (const k of ks) await simpanKontak(id, k).catch(e => log(`[${id}] kontak`, e.message)); });
+  sock.ev.on('contacts.upsert', async (ks) => {
+    const bernama = ks.filter(k => k.name).length; if (ks.length > 1 || bernama) log(`[${id}] contacts.upsert ${ks.length} kontak, ${bernama} punya nama tersimpan, ${ks.filter(k => k.notify).length} pushName`);
+    for (const k of ks) await simpanKontak(id, k).catch(e => log(`[${id}] kontak`, e.message)); });
   sock.ev.on('contacts.update', async (ks) => { for (const k of ks) { await simpanKontak(id, k).catch(() => {});
     if (k.id && 'imgUrl' in k) await q('UPDATE chat SET foto_at = NULL WHERE nomor_id = ? AND (jid = ? OR lid = ? OR pn = ?)', [id, jidNormalizedUser(k.id), pengguna(k.id), pengguna(k.id)]).catch(() => {}); } });
   sock.ev.on('lid-mapping.update', async (m) => { for (const x of [].concat(m || [])) if (x && x.lid && x.pn) await simpanLid(id, x.lid, x.pn, 'wa').catch(() => {}); });
