@@ -17,10 +17,10 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
 <link rel="icon" href="/img/prepare-bulat.png"><meta name="theme-color" content="#4A55A2">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/app.css?v=7">
+<link rel="stylesheet" href="/app.css?v=8">
 </head><body>
 <?php if (!$u): ?>
-<main class="masuk">
+<main class="masuk"><span class="masuk-cahaya" aria-hidden="true"></span>
   <form method="post" class="masuk-kartu" autocomplete="on">
     <img class="masuk-logo" src="/img/prepare.png" alt="Prepare">
     <h1>Inbox Affiliate</h1>

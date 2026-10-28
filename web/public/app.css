@@ -13,16 +13,30 @@ button,input,textarea{font:inherit;color:inherit}button{cursor:pointer}
 .mono,.angka{font-variant-numeric:tabular-nums}
 h1,h2,h3{font-family:var(--judul);letter-spacing:-.01em}
 
-/* masuk */
-.masuk{min-height:100%;display:grid;place-items:center;padding:24px 16px;background:radial-gradient(circle at 20% 10%,#E3E8FB,transparent 45%),var(--latar)}
-.masuk-kartu{width:min(380px,100%);background:var(--panel);border-radius:20px;padding:30px 26px;display:grid;gap:14px;box-shadow:var(--bayang-naik)}
-.masuk-logo{height:40px;width:auto;justify-self:start}
-.masuk h1{margin:0;font-size:20px}.masuk-sub{margin:-8px 0 4px;color:var(--redup)}
-.masuk label{display:grid;gap:6px;font-weight:600;font-size:13px}
-.masuk input{padding:11px 12px;border:1px solid var(--garis);border-radius:12px;background:#fff;font-weight:400;transition:border-color .15s,box-shadow .15s}
-.masuk input:focus{outline:none;border-color:var(--utama);box-shadow:0 0 0 3px var(--aksen-muda)}
-.masuk button{padding:12px;border:0;border-radius:12px;background:var(--gelap);color:#fff;font-weight:600;transition:background .15s}.masuk button:hover{background:var(--gelap-2)}
-.masuk-galat{margin:0;padding:10px 12px;border-radius:10px;background:var(--merah-muda);color:var(--merah);font-size:13px}
+/* masuk — gradient diagonal Prepare + cahaya lembut statis, kartu putih mengambang (form & logika tidak berubah) */
+.masuk{min-height:100%;display:grid;place-items:center;padding:24px 16px;position:relative;overflow:hidden;isolation:isolate;
+  background:linear-gradient(135deg,#4A55A2 0%,#5D6BC0 48%,#8B9BE0 100%)}
+.masuk::before,.masuk::after{content:"";position:absolute;border-radius:50%;filter:blur(70px);z-index:-1;pointer-events:none}
+.masuk::before{width:min(560px,90vw);height:min(560px,90vw);top:-18%;right:-12%;background:radial-gradient(circle,rgba(201,209,245,.55),rgba(201,209,245,0) 70%);animation:kilau 14s ease-in-out infinite alternate}
+.masuk::after{width:min(520px,85vw);height:min(520px,85vw);bottom:-22%;left:-14%;background:radial-gradient(circle,rgba(255,255,255,.28),rgba(255,255,255,0) 70%)}
+.masuk-cahaya{position:absolute;width:300px;height:300px;left:58%;top:62%;border-radius:50%;filter:blur(60px);background:radial-gradient(circle,rgba(201,209,245,.35),rgba(201,209,245,0) 70%);z-index:-1;pointer-events:none}
+@keyframes kilau{from{opacity:.75;transform:translate3d(0,0,0)}to{opacity:1;transform:translate3d(-14px,10px,0)}}
+.masuk-kartu{width:min(400px,100%);background:rgba(255,255,255,.97);-webkit-backdrop-filter:blur(14px) saturate(140%);backdrop-filter:blur(14px) saturate(140%);
+  border:1px solid rgba(255,255,255,.6);border-radius:28px;padding:36px 30px 30px;display:grid;gap:15px;
+  box-shadow:0 2px 6px rgba(31,35,64,.08),0 24px 60px rgba(31,35,64,.28)}
+.masuk-logo{height:50px;width:auto;justify-self:start;margin-bottom:4px}
+.masuk h1{margin:0;font:700 22px var(--judul);color:var(--tinta);letter-spacing:-.01em}.masuk-sub{margin:-8px 0 6px;color:var(--redup)}
+.masuk label{display:grid;gap:6px;font-weight:600;font-size:13px;color:var(--tinta)}
+.masuk input{padding:12px 14px;border:1px solid var(--garis);border-radius:14px;background:#fff;font-weight:400;transition:border-color .15s,box-shadow .15s}
+.masuk input:focus{outline:none;border-color:var(--utama);box-shadow:0 0 0 4px rgba(139,155,224,.22)}
+.masuk button{margin-top:4px;padding:13px;border:0;border-radius:14px;color:#fff;font:600 15px var(--sans);letter-spacing:.01em;
+  background:linear-gradient(120deg,#4A55A2,#8B9BE0);background-size:150% 100%;background-position:0 0;box-shadow:0 6px 18px rgba(74,85,162,.35);
+  transition:background-position .3s ease,box-shadow .2s ease,transform .15s ease}
+.masuk button:hover{background-position:100% 0;box-shadow:0 8px 24px rgba(74,85,162,.45);transform:translateY(-1px)}
+.masuk button:active{transform:translateY(0)}
+.masuk-galat{margin:0;padding:10px 12px;border-radius:12px;background:var(--merah-muda);color:var(--merah);font-size:13px}
+@media (max-width:480px){.masuk-kartu{padding:30px 22px 24px;border-radius:24px}.masuk-logo{height:44px}}
+@media (prefers-reduced-motion:reduce){.masuk::before{animation:none}}
 
 /* kerangka */
 .app{display:grid;grid-template-columns:84px 1fr;height:100dvh;overflow:hidden}
