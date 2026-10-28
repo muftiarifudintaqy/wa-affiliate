@@ -1,0 +1,12 @@
+{
+  "name": "wa-affiliate-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Inbox Affiliate: 6 nomor WhatsApp kantor (linked device, Baileys) untuk affiliate.prepareofficial.com",
+  "main": "index.js",
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "mysql2": "^3.24.3",
+    "pino": "^9.6.0"
+  }
+}

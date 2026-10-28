@@ -1,0 +1,9 @@
+# JANGAN masuk repo: sesi WhatsApp, media, unggahan, konfigurasi berisi kata sandi
+node_modules/
+.env
+*.env
+sesi/
+media/
+unggah/
+php-sesi/
+*.log
