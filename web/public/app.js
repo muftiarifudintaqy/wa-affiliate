@@ -47,9 +47,11 @@
     S.nomor = j.nomor; renderRel();
     if (S.hal === 'hubungkan') renderHubungkan();
   }
+  // [28 Okt] nama 6 slot HANYA dari label manual di halaman Hubungkan; kosong = "Aff N". Tidak pernah dari nama profil WA (nama_wa) atau nomor HP.
+  const labelSlot = (n) => String(n.label || '').trim() || 'Aff ' + n.id;
   // label pendek "Aff 1" untuk sidebar, inisial dari nama di belakang tanda "-" (mis. "Aff 1 - Natasya" → N)
   const labelPendek = (l) => String(l || '').split(/\s+[-–—]\s+/)[0].slice(0, 10);
-  const inisial = (n) => { const b = String(n.label || '').split(/\s+[-–—]\s+/)[1]; return b ? b.trim()[0].toUpperCase() : 'A' + ((String(n.label).match(/\d+/) || [n.id])[0]); };
+  const inisial = (n) => { const l = labelSlot(n), b = l.split(/\s+[-–—]\s+/)[1]; return b ? b.trim()[0].toUpperCase() : 'A' + ((l.match(/\d+/) || [n.id])[0]); };
   const foto = (n) => n.ada_foto == 1 ? `<img src="/media.php?profil=${n.id}&v=${n.foto_v || 0}" alt="">` : esc(inisial(n));
   const STATUS = { terhubung: 'Terhubung', terputus: 'Terputus', perlu_scan: 'Menunggu scan QR', menghubungkan: 'Menghubungkan', belum: 'Belum ditautkan' };
   // [28 Okt] keadaan tampilan: nomor yang pernah tertaut (jid ada) tapi tidak tersambung = "Terputus"; riwayat & foto tetap bisa dibaca
@@ -62,10 +64,10 @@
     return a ? 'koneksi putus (kode ' + a + ')' : ''; };
   function renderRel() {
     $('#relNomor').innerHTML = `<button class="rel-n ${S.nomorAktif === 'semua' ? 'on' : ''}" data-n="semua" title="Semua nomor"><span class="foto">∑</span><span class="lbl">Semua</span></button>` +
-      S.nomor.map(n => { const k = keadaan(n); return `<button class="rel-n ${String(S.nomorAktif) === String(n.id) ? 'on' : ''} ${k === 'terputus' ? 'putus' : ''}" data-n="${n.id}" title="${esc(n.label)}${n.nama_wa ? ' (' + esc(n.nama_wa) + ')' : ''} · ${esc(STATUS[k])}${n.jid ? ' · ' + esc(nomorHp(n.jid)) : ''} · belum dibalas ${Number(n.chat_belum_dibalas) || 0}${k === 'terputus' ? ' · mode baca, scan ulang untuk balas' : ''}">
-        <span class="foto">${foto(n)}</span><i class="${k}">${k === 'terputus' ? IKON_PUTUS : ''}</i>${Number(n.chat_belum_dibalas) > 0 ? '<b>' + n.chat_belum_dibalas + '</b>' : ''}<span class="lbl">${esc(labelPendek(n.label))}</span>${k === 'terputus' ? '<span class="lbl-putus">Terputus</span>' : ''}</button>`; }).join('');
+      S.nomor.map(n => { const k = keadaan(n); return `<button class="rel-n ${String(S.nomorAktif) === String(n.id) ? 'on' : ''} ${k === 'terputus' ? 'putus' : ''}" data-n="${n.id}" title="${esc(labelSlot(n))} · ${esc(STATUS[k])}${n.jid ? ' · ' + esc(nomorHp(n.jid)) : ''} · belum dibalas ${Number(n.chat_belum_dibalas) || 0}${k === 'terputus' ? ' · mode baca, scan ulang untuk balas' : ''}">
+        <span class="foto">${foto(n)}</span><i class="${k}">${k === 'terputus' ? IKON_PUTUS : ''}</i>${Number(n.chat_belum_dibalas) > 0 ? '<b>' + n.chat_belum_dibalas + '</b>' : ''}<span class="lbl">${esc(labelPendek(labelSlot(n)))}</span>${k === 'terputus' ? '<span class="lbl-putus">Terputus</span>' : ''}</button>`; }).join('');
     const n = S.nomor.find(x => String(x.id) === String(S.nomorAktif));
-    const judulAkun = (n) => { const l = String(n.label || ''), dasar = labelPendek(l), sisa = l.split(/\s+[-–—]\s+/).slice(1).join(' - ') || n.nama_wa || (n.jid ? nomorHp(n.jid) : 'belum ditautkan'); return dasar + ' — ' + sisa; };
+    const judulAkun = (n) => { const l = labelSlot(n), sisa = l.split(/\s+[-–—]\s+/).slice(1).join(' - '); return sisa ? labelPendek(l) + ' — ' + sisa : l; };
     $('#judulNomor').textContent = n ? judulAkun(n) : 'Semua nomor';
     renderRingkas(judulAkun);
     $('#statusNomor').innerHTML = n ? `<span class="st ${keadaan(n)}">${keadaan(n) === 'terputus' ? IKON_PUTUS + ' ' : ''}${esc(STATUS[keadaan(n)])}</span>` : '';
@@ -76,7 +78,7 @@
     const box = $('#ringkas'); if (!box) return;
     const tot = S.nomor.reduce((a, n) => a + (Number(n.chat_belum_dibalas) || 0), 0), angka = (x, putus) => `<b class="${x > 0 ? (putus ? 'redup' : 'merah') : ''}">${x}</b>`;
     box.innerHTML = `<span class="r-judul">Belum dibalas:</span> <button type="button" data-n="semua" class="${S.nomorAktif === 'semua' ? 'on' : ''}" title="Semua akun">${angka(tot)}</button>` +
-      S.nomor.map(n => { const putus = keadaan(n) === 'terputus'; return `<span class="r-sep">·</span><button type="button" data-n="${n.id}" class="${String(S.nomorAktif) === String(n.id) ? 'on' : ''} ${putus ? 'putus' : ''}" title="${esc(judulAkun(n))}${putus ? ' · Terputus' : ''}">${putus ? IKON_PUTUS : ''}${esc(labelPendek(n.label).replace(/\s+/g, ''))} ${angka(Number(n.chat_belum_dibalas) || 0, putus)}</button>`; }).join('');
+      S.nomor.map(n => { const putus = keadaan(n) === 'terputus'; return `<span class="r-sep">·</span><button type="button" data-n="${n.id}" class="${String(S.nomorAktif) === String(n.id) ? 'on' : ''} ${putus ? 'putus' : ''}" title="${esc(judulAkun(n))}${putus ? ' · Terputus' : ''}">${putus ? IKON_PUTUS : ''}${esc(labelPendek(labelSlot(n)).replace(/\s+/g, ''))} ${angka(Number(n.chat_belum_dibalas) || 0, putus)}</button>`; }).join('');
   }
   $('#ringkas').addEventListener('click', (e) => { const b = e.target.closest('button[data-n]'); if (!b) return; S.nomorAktif = b.dataset.n; S.jejakChats = ''; renderRel(); muatChats(); });
   // filter "Belum dibalas" (akun terpilih atau Semua)
@@ -90,10 +92,10 @@
     const tot = S.nomor.reduce((a, n) => { a.on += n.status === 'terhubung' ? 1 : 0; a.belum += Number(n.chat_belum_dibalas) || 0; a.chat += Number(n.jumlah_chat) || 0; return a; }, { on: 0, belum: 0, chat: 0 });
     box.innerHTML = `<button class="kartu semua ${S.nomorAktif === 'semua' ? 'on' : ''}" data-n="semua"><div><div class="k-judul">Semua nomor</div><div class="k-sub">Gabungan chat ${S.nomor.length} nomor affiliate</div></div>
         <div class="k-angka"><div><b>${tot.on}/${S.nomor.length}</b>terhubung</div><div><b>${tot.belum}</b>belum dibalas</div><div><b>${tot.chat.toLocaleString('id-ID')}</b>chat</div><div><b>${S.nomor.filter(n => keadaan(n) === 'terputus' || keadaan(n) === 'perlu_scan').length}</b>perlu dicek</div></div></button>` +
-      S.nomor.map(n => { const z = terakhir(n); return `<button class="kartu ${String(S.nomorAktif) === String(n.id) ? 'on' : ''}" data-n="${n.id}" title="${esc(n.label)}">
+      S.nomor.map(n => { const z = terakhir(n); return `<button class="kartu ${String(S.nomorAktif) === String(n.id) ? 'on' : ''}" data-n="${n.id}" title="${esc(labelSlot(n))}">
         <span class="foto">${foto(n)}</span>
-        <span class="k-nama"><span>${esc(n.label)}</span></span>
-        <span class="k-no">${n.jid ? esc(nomorHp(n.jid)) : 'Belum ditautkan'}${n.nama_wa ? ' · ' + esc(n.nama_wa) : ''}</span>
+        <span class="k-nama"><span>${esc(labelSlot(n))}</span></span>
+        <span class="k-no">${n.jid ? esc(nomorHp(n.jid)) : 'Belum ditautkan'}</span>
         <span class="k-bawah"><span class="st ${keadaan(n)}">${keadaan(n) === 'terputus' ? IKON_PUTUS + ' ' : ''}${esc(STATUS[keadaan(n)])}</span>${Number(n.chat_belum_dibalas) > 0 ? `<span class="lencana ${keadaan(n) === 'terputus' ? 'redup' : ''}" title="chat belum dibalas">${n.chat_belum_dibalas}</span>` : ''}</span>
         <span class="k-bawah"><span class="k-pesan">${z ? (z.tim ? 'Tim → ' : '') + '<b>' + esc(z.nama && z.nama.includes('@') ? nomorHp(z.nama) : z.nama) + '</b>: ' + esc(z.cup || '') : 'Belum ada pesan'}</span><span class="k-jam">${z ? jamPendek(z.t) : ''}</span></span></button>`; }).join('');
   }
@@ -369,7 +371,7 @@
   function dialogLepas(n) {
     if (!n) return;
     const jp = Number(n.jumlah_pesan).toLocaleString('id-ID'), jc = Number(n.jumlah_chat).toLocaleString('id-ID');
-    modal(`<form class="lepas" id="formLepas"><h3>Lepas ${esc(n.label)}${n.jid ? ' (' + esc(nomorHp(n.jid)) + ')' : ''}?</h3>
+    modal(`<form class="lepas" id="formLepas"><h3>Lepas ${esc(labelSlot(n))}${n.jid ? ' (' + esc(nomorHp(n.jid)) + ')' : ''}?</h3>
       <p class="kecil">Sesi WhatsApp di server dihapus dan perangkat tertaut di HP ikut dilepas. Pilih apa yang terjadi dengan riwayatnya:</p>
       <label class="pilih"><input type="radio" name="riwayat" value="simpan" checked><span><b>Simpan riwayat</b><br>${jp} pesan &amp; ${jc} chat beserta foto tetap bisa dibaca (mode baca). Slot ini hanya bisa ditautkan lagi ke nomor yang sama.</span></label>
       <label class="pilih bahaya"><input type="radio" name="riwayat" value="hapus"><span><b>Hapus riwayat juga</b><br>${jp} pesan, ${jc} chat, media &amp; foto dihapus permanen dari server dan tidak bisa dikembalikan. Slot kosong untuk nomor lain.</span></label>
