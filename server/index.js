@@ -335,11 +335,16 @@ async function mulai(id) {
         if (keluar || berhenti) { fs.rmSync(dir, { recursive: true, force: true }); }
         if (hapus) await hapusRiwayat(id);
         if (!berhenti) {
-          const n = (await q('SELECT label, notif_putus_tgl, terakhir_terhubung FROM nomor WHERE id = ?', [id]))[0];
-          if (n && n.terakhir_terhubung && n.notif_putus_tgl !== tglHariIni()) {
+          // [30 Okt] putus sesaat (428/503/515, tersambung lagi ±17 dtk) tidak lagi memicu WA: tunggu 2 menit, kirim hanya kalau
+          // nomor MASIH belum tersambung. Keluar dari HP (401) tetap langsung dikabari (perlu scan QR ulang).
+          const kabari = async () => {
+            const n = (await q('SELECT label, status, notif_putus_tgl, terakhir_terhubung FROM nomor WHERE id = ?', [id]))[0];
+            if (!n || !n.terakhir_terhubung || n.notif_putus_tgl === tglHariIni()) return;
+            if (!keluar && n.status === 'terhubung') { log(`[${id}] putus sesaat, sudah tersambung lagi — tidak dikabari`); return; }
             await q('UPDATE nomor SET notif_putus_tgl = ? WHERE id = ?', [tglHariIni(), id]);
-            await waMufti(`wa-aff-putus-${id}-${tglHariIni()}`, `⚠️ Inbox Affiliate: nomor "${n.label}" ${keluar ? 'TERLEPAS (perlu scan QR ulang)' : 'terputus'} (${jam()}).\nCek: https://affiliate.prepareofficial.com/?hal=hubungkan`);
-          }
+            await waMufti(`wa-aff-putus-${id}-${tglHariIni()}`, `⚠️ Inbox Affiliate: nomor "${n.label}" ${keluar ? 'TERLEPAS (perlu scan QR ulang)' : 'terputus > 2 menit'} (${jam()}).\nCek: https://affiliate.prepareofficial.com/?hal=hubungkan`);
+          };
+          if (keluar) await kabari(); else setTimeout(() => kabari().catch(e => log(`[${id}] kabari putus`, e.message)), 120000);
           if (!keluar) setTimeout(() => mulai(id).catch(e => log(`[${id}] gagal sambung ulang`, e.message)), 15000);
         }
       }
