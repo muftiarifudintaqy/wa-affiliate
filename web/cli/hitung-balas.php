@@ -10,4 +10,4 @@ if (!flock($kunci, LOCK_EX | LOCK_NB)) exit;
 $t = microtime(true);
 $ids = q("SELECT id FROM chat WHERE jenis = 'pribadi' AND pesan_terakhir_at IS NOT NULL" . ($semua ? '' : ' AND pesan_terakhir_at >= NOW() - INTERVAL 3 HOUR'))->fetchAll(PDO::FETCH_COLUMN);
 $n = hitung_balasan($ids);
-if ($semua || $n) echo date('Y-m-d H:i:s') . ' hitung-balas: ' . count($ids) . ' chat, ' . $n . ' giliran, ' . round(microtime(true) - $t, 1) . " dtk\n";
+if ($semua) echo date('Y-m-d H:i:s') . ' hitung-balas: ' . count($ids) . ' chat, ' . $n . ' giliran, ' . round(microtime(true) - $t, 1) . " dtk\n";
