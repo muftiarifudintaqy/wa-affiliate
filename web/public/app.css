@@ -335,3 +335,28 @@ table.tb{border-collapse:collapse;width:100%;background:#fff;border-radius:var(-
   border-radius:999px;padding:9px 16px;font:600 13px var(--sans);box-shadow:var(--bayang-naik);text-align:center}
 /* [10 Nov] kolom obrolan sempit (iPad potret, laptop kecil): info kontak 1 baris + … (lengkapnya di tooltip/Info) */
 @media (max-width:1100px){#infoChat{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.obrolan-atas .btn-garis{flex:none}}
+/* [10 Nov] logo = tombol ke kartu 6 nomor */
+.rel-logo-btn{border:0;background:none;padding:0;border-radius:50%;flex:none;display:grid;place-items:center;min-width:44px;min-height:44px}
+@media (max-width:760px){.rel-logo-btn{grid-area:logo}}
+/* [10 Nov] kartu 6 nomor (halaman awal owner): paling lambat di atas */
+.bn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr));gap:12px}
+.bn{display:grid;gap:10px;text-align:left;background:var(--panel);border:2px solid transparent;border-radius:var(--r);box-shadow:var(--bayang);padding:14px 16px;min-width:0;transition:transform .15s,box-shadow .15s,border-color .15s}
+.bn:hover{transform:translateY(-1px);box-shadow:var(--bayang-naik);border-color:var(--aksen)}
+.bn-atas{display:flex;align-items:center;gap:10px;min-width:0}
+.bn .foto{width:42px;height:42px;border-radius:50%;background:var(--aksen);color:var(--gelap);display:grid;place-items:center;font:700 14px var(--judul);overflow:hidden;flex:none}.bn .foto img{width:100%;height:100%;object-fit:cover}
+.bn.putus .foto{filter:grayscale(1);opacity:.6}
+.bn-nama{flex:1;min-width:0;display:grid;gap:3px;justify-items:start}.bn-nama b{font:600 15px var(--judul);max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bn-peringkat{flex:none;font:700 10.5px var(--sans);letter-spacing:.03em;text-transform:uppercase;color:var(--merah);background:var(--merah-muda);border-radius:999px;padding:3px 8px}
+.bn-utama{display:flex;align-items:baseline;gap:8px}.bn-utama b{font:700 26px var(--judul)}.bn-utama span{font-size:12.5px;color:var(--redup)}
+.bn-angka{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.bn-angka span{background:var(--latar);border-radius:10px;padding:7px 9px;font-size:11.5px;color:var(--redup);line-height:1.3;min-width:0}
+.bn-angka b{display:block;font:700 15px var(--judul);color:var(--tinta);font-variant-numeric:tabular-nums}.bn-angka b.merah{color:var(--merah)}
+.bn-pesan{font-size:12.5px;color:var(--redup);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.bn-pesan b{color:var(--tinta);font-weight:600}
+/* [10 Nov] kelola akun */
+.akun-box{margin-top:26px}.akun-box h3{margin:0 0 4px}.akun-box>p{margin:0 0 12px}
+.akun-box select{border:1px solid var(--garis);border-radius:10px;padding:6px 8px;background:#fff;min-height:36px}
+.akun-aksi{display:flex;gap:6px;flex-wrap:wrap}.akun-aksi .btn{padding:6px 12px;font-size:12.5px}
+.akun-baru{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,180px),1fr));gap:10px;align-items:end;background:var(--panel);border-radius:var(--r);box-shadow:var(--bayang);padding:14px 16px}
+.akun-baru>b{grid-column:1/-1;font-family:var(--judul)}
+.akun-baru label{display:grid;gap:4px;font-size:12.5px;font-weight:600}.akun-baru input,.akun-baru select{border:1px solid var(--garis);border-radius:10px;padding:8px 10px;font-weight:400;min-height:40px;width:100%}
+@media (pointer:coarse){.akun-box select,.akun-baru input,.akun-baru select{min-height:44px}.akun-aksi .btn{min-height:44px}}

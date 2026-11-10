@@ -184,3 +184,5 @@ CREATE TABLE IF NOT EXISTS akun_lihat (
   dibuat_at DATETIME NOT NULL, sandi_diganti_at DATETIME NULL, login_terakhir DATETIME NULL,
   UNIQUE KEY u_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- [10 Nov] akun lokal bisa berperan OWNER (penuh, setara Developer/Mufti) atau lihat saja. Nama tabel tetap akun_lihat.
+ALTER TABLE akun_lihat ADD COLUMN peran ENUM('lihat','penuh') NOT NULL DEFAULT 'lihat' AFTER nama;

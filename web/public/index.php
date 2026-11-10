@@ -28,7 +28,7 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
 <meta name="apple-mobile-web-app-title" content="Affiliate"><meta name="application-name" content="Affiliate">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/app.css?v=17">
+<link rel="stylesheet" href="/app.css?v=18">
 </head><body>
 <?php if (!$u): ?>
 <main class="masuk"><span class="masuk-cahaya" aria-hidden="true"></span>
@@ -58,10 +58,12 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
     <a class="masuk-keluar" href="/?keluar=1">Keluar</a>
   </form>
 </main>
-<?php else: $lihat = $u['peran'] !== 'penuh'; ?>
-<div id="app" class="app" data-csrf="<?= e($_SESSION['csrf']) ?>" data-user="<?= e($u['nama']) ?>" data-peran="<?= e($u['peran']) ?>"<?= ($_GET['sandi'] ?? '') === 'ok' ? ' data-pesan="Kata sandi baru tersimpan"' : '' ?>>
+<?php else: $lihat = $u['peran'] !== 'penuh';
+  // [10 Nov] halaman awal: owner (akun lokal penuh) = kartu 6 nomor, akun lihat = Waktu Balas, akun ERP (Mufti) = Inbox
+  $awal = $lihat ? 'waktu' : (!empty($u['lokal']) ? 'nomor' : 'inbox'); ?>
+<div id="app" class="app" data-csrf="<?= e($_SESSION['csrf']) ?>" data-user="<?= e($u['nama']) ?>" data-peran="<?= e($u['peran']) ?>" data-awal="<?= $awal ?>"<?= ($_GET['sandi'] ?? '') === 'ok' ? ' data-pesan="Kata sandi baru tersimpan"' : '' ?>>
   <nav class="rel" aria-label="Nomor">
-    <img class="rel-logo" src="/img/prepare-bulat.png" alt="Prepare">
+    <button type="button" class="rel-logo-btn" data-hal="nomor" title="Kartu 6 nomor" aria-label="Kartu 6 nomor"><img class="rel-logo" src="/img/prepare-bulat.png" alt=""></button>
     <div id="relNomor" class="rel-nomor"></div>
     <?php /* [10 Nov] ikon SVG (emoji tampil kotak di sebagian HP), area sentuh ≥ 40 px; ⏱ Waktu Balas */
       $ikon = fn($d) => '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' . $d . '</svg>'; ?>
@@ -111,6 +113,7 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
     </main>
     </div>
   </section>
+  <section id="halNomor" class="hal panel-hal" hidden></section>
   <section id="halWaktu" class="hal panel-hal" hidden></section>
   <section id="halRingkasan" class="hal panel-hal" hidden></section>
   <section id="halHubungkan" class="hal panel-hal" hidden></section>
@@ -119,7 +122,7 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
 <div class="modal" id="modal" hidden><div class="modal-kartu"><button class="modal-tutup" id="modalTutup" aria-label="Tutup">✕</button><div id="modalIsi"></div></div></div>
 <div class="toast" id="toast" role="status" hidden></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="/app.js?v=13"></script>
+<script src="/app.js?v=14"></script>
 <?php endif; ?>
 <script>if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});</script>
 </body></html>

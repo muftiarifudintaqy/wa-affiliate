@@ -136,12 +136,12 @@
   }
 
   $('#relNomor').addEventListener('click', (e) => { const b = e.target.closest('.rel-n'); if (!b) return; S.nomorAktif = b.dataset.n; S.jejakChats = ''; renderRel(); muatChats(); gantiHal('inbox'); });
-  $$('.rel-btn[data-hal]').forEach(b => b.addEventListener('click', () => gantiHal(b.dataset.hal)));
+  $$('.rel-btn[data-hal], .rel-logo-btn').forEach(b => b.addEventListener('click', () => gantiHal(b.dataset.hal)));
   function gantiHal(h) {
     S.hal = h; $$('.rel-btn[data-hal]').forEach(b => b.classList.toggle('on', b.dataset.hal === h));
-    $('#halInbox').hidden = h !== 'inbox'; $('#halWaktu').hidden = h !== 'waktu'; $('#halRingkasan').hidden = h !== 'ringkasan'; $('#halHubungkan').hidden = h !== 'hubungkan'; $('#halAudit').hidden = h !== 'audit';
+    $('#halInbox').hidden = h !== 'inbox'; $('#halNomor').hidden = h !== 'nomor'; $('#halWaktu').hidden = h !== 'waktu'; $('#halRingkasan').hidden = h !== 'ringkasan'; $('#halHubungkan').hidden = h !== 'hubungkan'; $('#halAudit').hidden = h !== 'audit';
     if (h !== 'inbox') tutupObrolan();
-    if (h === 'waktu') renderWaktu(); if (h === 'ringkasan') renderRingkasan(); if (h === 'hubungkan') renderHubungkan(); if (h === 'audit') renderAudit();
+    if (h === 'nomor') renderBeranda(); if (h === 'waktu') renderWaktu(); if (h === 'ringkasan') renderRingkasan(); if (h === 'hubungkan') { renderHubungkan(); renderAkun(); } if (h === 'audit') renderAudit();
   }
 
   // ---------------------------------------------------------------- daftar chat
@@ -376,7 +376,7 @@
   const pasang = (el, html) => { if (el.dataset.html === html) return false; el.innerHTML = html; el.dataset.html = html; return true; };
   function renderHubungkan() {
     const box = $('#halHubungkan');
-    if (!box.dataset.siap) { box.dataset.siap = 1; box.innerHTML = '<h2>Hubungkan nomor</h2><p>Label tiap nomor bisa diubah langsung di kotak nama (contoh: Aff 1 - Natasya), tersimpan saat tekan Enter atau klik di luar kotak. Di HP tim: WhatsApp → Perangkat tertaut → Tautkan perangkat, lalu pindai QR. HP tetap bisa dipakai seperti biasa. Riwayat chat lama ikut ditarik penuh setelah tertaut.</p><div class="kartu-n" id="kartuN"></div>'; }
+    if (!box.dataset.siap) { box.dataset.siap = 1; setTimeout(renderAkun, 0); box.innerHTML = '<h2>Hubungkan nomor</h2><p>Label tiap nomor bisa diubah langsung di kotak nama (contoh: Aff 1 - Natasya), tersimpan saat tekan Enter atau klik di luar kotak. Di HP tim: WhatsApp → Perangkat tertaut → Tautkan perangkat, lalu pindai QR. HP tetap bisa dipakai seperti biasa. Riwayat chat lama ikut ditarik penuh setelah tertaut.</p><div class="kartu-n" id="kartuN"></div><div id="akunBox" class="akun-box"></div>'; }
     const wadah = $('#kartuN');
     S.nomor.forEach((n, urut) => {
       let kartu = $(`.kn[data-n="${n.id}"]`, wadah);
@@ -478,6 +478,52 @@
       ${(j.baris || []).map(r => `<tr><td class="mono">${esc(r.tanggal)}</td><td>${esc(namaNomorId(r.nomor_id, r.label))}</td><td class="n">${r.chat_masuk}</td><td class="n">${r.chat_keluar}</td><td class="n">${r.pesan_masuk}</td><td class="n">${r.pesan_keluar}</td><td class="n">${r.kontak_baru}</td><td class="n">${durasi(r.waktu_balas_rata_detik)}</td><td class="n">${r.belum_dibalas_1jam}</td></tr>`).join('')}</tbody></table></div>`;
     $('#rTampil').onclick = () => renderRingkasan($('#rDari').value, $('#rSampai').value);
   }
+  // ---------------------------------------------------------------- [10 Nov] Kartu 6 nomor (halaman awal owner): paling lambat membalas hari ini di atas
+  async function renderBeranda() {
+    const box = $('#halNomor');
+    if (!box.dataset.siap) { box.dataset.siap = 1; box.innerHTML = '<h2>Nomor affiliate</h2><p>Urut dari yang <b>paling lambat membalas hari ini</b> (jam kerja): balasan terlama atau chat yang masih menunggu, mana yang lebih lama. Klik kartu untuk buka chat nomor itu.</p><div class="bn-grid" id="bnGrid"><p class="kecil">Memuat…</p></div>'; }
+    if (!S.nomor.length) await muatNomor();
+    const j = await api('waktu_balas', { rentang: 'hari' }); if (!j.ok) return;
+    const st = {}; (j.nomor || []).forEach(n => st[n.nomor_id] = n);
+    const kls = (x) => x > 7200 ? 'merah' : x > 1800 ? 'oranye' : '';
+    const data = S.nomor.map(n => { const w = st[n.id] || {}; return { n, w, lambat: Math.max(w.terlama || 0, w.tunggu_terlama || 0), tertaut: !!n.jid }; });
+    data.sort((a, b) => (b.tertaut - a.tertaut) || (b.lambat - a.lambat) || ((b.w.rata || 0) - (a.w.rata || 0)) || ((+b.n.chat_belum_dibalas || 0) - (+a.n.chat_belum_dibalas || 0)) || (a.n.id - b.n.id));
+    $('#bnGrid').innerHTML = data.map(({ n, w, lambat }, i) => { const k = keadaan(n), z = n.terakhir ? n.terakhir.split('\t') : null;
+      return `<button type="button" class="bn ${k === 'terputus' ? 'putus' : ''}" data-n="${n.id}">
+        <span class="bn-atas"><span class="foto">${foto(n)}</span><span class="bn-nama"><b>${esc(namaSlot(n))}</b><span class="st ${k}">${k === 'terputus' ? IKON_PUTUS + ' ' : ''}${esc(STATUS[k])}</span></span>${i === 0 && lambat ? '<span class="bn-peringkat">paling lambat</span>' : ''}</span>
+        <span class="bn-utama"><b class="dur ${kls(lambat)}">${lambat ? lama(lambat) : '–'}</b><span>terlambat hari ini</span></span>
+        <span class="bn-angka"><span><b>${w.rata != null ? lama(w.rata) : '–'}</b>rata-rata balas</span><span><b class="${w.belum ? 'merah' : ''}">${w.belum || 0}</b>menunggu hari ini</span><span><b>${Number(n.chat_belum_dibalas) || 0}</b>belum dibalas (semua)</span></span>
+        ${z ? `<span class="bn-pesan">${z[1] === '1' ? 'Tim → ' : ''}<b>${esc(z[2] && z[2].includes('@') ? nomorHp(z[2]) : z[2])}</b>: ${esc(z[3] || '')}</span>` : '<span class="bn-pesan">Belum ada pesan</span>'}</button>`; }).join('');
+  }
+  $('#halNomor').addEventListener('click', (e) => { const b = e.target.closest('.bn[data-n]'); if (!b) return; S.nomorAktif = b.dataset.n; S.jejakChats = ''; renderRel(); muatChats(); gantiHal('inbox'); });
+
+  // ---------------------------------------------------------------- [10 Nov] Kelola akun (owner & Mufti) — di halaman Hubungkan
+  async function renderAkun() {
+    const box = $('#akunBox'); if (!box) return;
+    const j = await api('akun_daftar'); if (!j.ok) { box.innerHTML = ''; return; }
+    const tgl = (x) => x ? x.slice(8, 10) + '/' + x.slice(5, 7) + ' ' + x.slice(11, 16) : '–';
+    box.innerHTML = `<h3>Akun pengguna</h3><p class="kecil">Owner = akses penuh seperti Developer (baca, balas, hubungkan nomor, kelola akun, Audit). Lihat saja = hanya baca chat, Ringkasan & Waktu Balas. Akun baru & reset sandi wajib ganti sandi saat login. Semua perubahan tercatat di Audit.</p>
+      <div class="tb-bungkus"><table class="tb tb-w"><thead><tr><th>Nama</th><th>Username</th><th>Peran</th><th>Status</th><th>Login terakhir</th><th>Aksi</th></tr></thead><tbody>
+      ${j.erp.map(a => `<tr><td>${esc(a.nama)}</td><td class="mono">${esc(a.username)}</td><td><span class="lewat web">Developer (akun ERP)</span></td><td>Aktif</td><td>–</td><td class="kecil">diatur lewat ERP</td></tr>`).join('')}
+      ${j.lokal.map(a => { const diri = -a.id === j.saya; return `<tr data-akun="${a.id}"><td>${esc(a.nama)}${diri ? ' <span class="kecil">(Anda)</span>' : ''}</td><td class="mono">${esc(a.username)}</td>
+        <td><select data-ubah="peran" ${diri ? 'disabled' : ''} aria-label="Peran ${esc(a.nama)}"><option value="penuh" ${a.peran === 'penuh' ? 'selected' : ''}>Owner (penuh)</option><option value="lihat" ${a.peran === 'lihat' ? 'selected' : ''}>Lihat saja</option></select></td>
+        <td>${a.aktif == 1 ? (a.wajib_ganti == 1 ? '<span class="dur oranye">belum ganti sandi</span>' : 'Aktif') : '<span class="dur merah">Nonaktif</span>'}</td><td class="mono">${tgl(a.login_terakhir)}</td>
+        <td class="akun-aksi"><button type="button" class="btn abu" data-reset>Reset sandi</button>${diri ? '' : `<button type="button" class="btn ${a.aktif == 1 ? 'merah' : 'abu'}" data-aktif="${a.aktif == 1 ? 0 : 1}">${a.aktif == 1 ? 'Nonaktifkan' : 'Aktifkan'}</button>`}</td></tr>`; }).join('')}</tbody></table></div>
+      <form class="akun-baru" id="akunBaru"><b>Tambah akun</b>
+        <label>Nama<input name="nama" required maxlength="120" placeholder="mis. Bu Dewi"></label><label>Username<input name="username" required pattern="[a-z0-9._-]{3,60}" placeholder="huruf kecil" autocapitalize="none"></label>
+        <label>Peran<select name="peran"><option value="penuh">Owner (penuh)</option><option value="lihat">Lihat saja</option></select></label>
+        <label>Kata sandi awal<input name="sandi" type="password" required minlength="8" autocomplete="new-password"></label><button class="btn" type="submit">Tambah</button></form>`;
+  }
+  const akunKirim = async (aksi, data, ok) => { const j = await api(aksi, Object.assign({ __post: 1 }, data)); toast(j.ok ? ok : (j.pesan || 'Gagal')); renderAkun(); };
+  document.addEventListener('change', (e) => { const sel = e.target.closest('#akunBox select[data-ubah]'); if (!sel) return; const id = sel.closest('tr').dataset.akun; if (confirm('Ubah peran akun ini jadi ' + sel.options[sel.selectedIndex].text + '?')) akunKirim('akun_ubah', { id, peran: sel.value }, 'Peran diubah'); else renderAkun(); });
+  document.addEventListener('click', (e) => {
+    const r = e.target.closest('#akunBox [data-reset]'), a = e.target.closest('#akunBox [data-aktif]'); if (!r && !a) return;
+    const tr = (r || a).closest('tr'), id = tr.dataset.akun, nama = tr.cells[0].textContent.trim();
+    if (r) { const s = prompt('Kata sandi sementara untuk ' + nama + ' (min. 8 karakter). Pemilik akun wajib menggantinya saat login berikutnya:'); if (s) akunKirim('akun_reset', { id, sandi: s }, 'Sandi direset, wajib ganti saat login'); }
+    if (a && confirm((a.dataset.aktif === '1' ? 'Aktifkan' : 'Nonaktifkan') + ' akun ' + nama + '?')) akunKirim('akun_ubah', { id, aktif: a.dataset.aktif }, a.dataset.aktif === '1' ? 'Akun diaktifkan' : 'Akun dinonaktifkan');
+  });
+  document.addEventListener('submit', (e) => { const f = e.target.closest('#akunBaru'); if (!f) return; e.preventDefault(); akunKirim('akun_tambah', { nama: f.nama.value, username: f.username.value, peran: f.peran.value, sandi: f.sandi.value }, 'Akun ditambahkan — wajib ganti sandi saat login pertama'); });
+
   // ---------------------------------------------------------------- [10 Nov] Waktu Balas
   S.rentangWaktu = 'hari';
   async function renderWaktu() {
@@ -523,7 +569,7 @@
   // ---------------------------------------------------------------- jalan
   if (app.dataset.pesan) toast(app.dataset.pesan);
   muatNomor().then(muatChats);
-  if (LIHAT) gantiHal('waktu');   // [10 Nov] akun lihat (owner): langsung ke Waktu Balas
+  if (app.dataset.awal && app.dataset.awal !== 'inbox') gantiHal(app.dataset.awal);   // [10 Nov] owner: kartu 6 nomor, akun lihat: Waktu Balas
 
   // ---------------------------------------------------------------- [10 Nov] petunjuk pasang ke layar utama (sekali, bisa ditutup)
   // iPhone/iPad: Safari & Chrome (iOS 16.4+) sama-sama lewat Bagikan → Tambahkan ke Layar Utama. Android/Chrome desktop: tombol Pasang (beforeinstallprompt).

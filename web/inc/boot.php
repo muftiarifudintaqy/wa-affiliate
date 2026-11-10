@@ -56,8 +56,8 @@ if (!empty($_SESSION['uid'])) {
 if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(24));
 }
 
-/** User login: akun ERP di IZIN_USER_ID (peran 'penuh'), atau [10 Nov] akun lihat saja (tabel akun_lihat, uid negatif = -id, peran 'lihat').
-    Akun lihat dicek ulang ke DB tiap request: dinonaktifkan / wajib ganti sandi langsung berlaku. */
+/** User login: akun ERP di IZIN_USER_ID (peran 'penuh'), atau [10 Nov] akun lokal (tabel akun_lihat, uid negatif = -id): peran 'penuh' = owner
+    (setara Developer/Mufti) atau 'lihat'. Akun lokal dicek ulang ke DB tiap request: peran, nonaktif & wajib ganti sandi langsung berlaku. */
 function user(bool $segar = false): ?array {
     static $u = false;
     if ($segar) $u = false;
@@ -65,8 +65,8 @@ function user(bool $segar = false): ?array {
     $id = (int)($_SESSION['uid'] ?? 0);
     if ($id > 0) return $u = in_array($id, izin_user(), true) ? ['id' => $id, 'nama' => (string)$_SESSION['nama'], 'peran' => 'penuh', 'wajib_ganti' => false] : null;
     if ($id < 0) {
-        $a = q('SELECT id, nama, wajib_ganti FROM akun_lihat WHERE id = ? AND aktif = 1', [-$id])->fetch();
-        return $u = $a ? ['id' => $id, 'nama' => (string)$a['nama'], 'peran' => 'lihat', 'wajib_ganti' => (bool)$a['wajib_ganti']] : null;
+        $a = q('SELECT id, nama, peran, wajib_ganti FROM akun_lihat WHERE id = ? AND aktif = 1', [-$id])->fetch();
+        return $u = $a ? ['id' => $id, 'nama' => (string)$a['nama'], 'peran' => $a['peran'] === 'penuh' ? 'penuh' : 'lihat', 'lokal' => true, 'wajib_ganti' => (bool)$a['wajib_ganti']] : null;
     }
     return $u = null;
 }
@@ -88,17 +88,17 @@ function catat_audit(string $aksi, ?int $nomor, ?int $chat, ?int $pesan, ?int $a
 function coba_login(string $nama, string $sandi): string {
     $gagal = (int)q("SELECT COUNT(*) FROM akses_log WHERE ip = ? AND aksi = 'login_gagal' AND waktu > NOW() - INTERVAL 15 MINUTE", [ip()])->fetchColumn();
     if ($gagal >= 5) return 'Terlalu banyak percobaan. Coba lagi 15 menit lagi.';
-    $a = q('SELECT id, nama, sandi_hash, aktif FROM akun_lihat WHERE username = ?', [$nama])->fetch();
+    $a = q('SELECT id, nama, peran, sandi_hash, aktif FROM akun_lihat WHERE username = ?', [$nama])->fetch();
     if ($a) {
         if (!$a['aktif'] || !password_verify($sandi, (string)$a['sandi_hash'])) {
             q("INSERT INTO akses_log (user_id, nama, aksi, keterangan, ip, user_agent, waktu) VALUES (?, ?, 'login_gagal', ?, ?, ?, NOW())",
-              [-(int)$a['id'], $a['nama'], mb_substr('akun lihat: ' . $nama . ($a['aktif'] ? '' : ' (nonaktif)'), 0, 255), ip(), ua()]);
+              [-(int)$a['id'], $a['nama'], mb_substr('akun lokal: ' . $nama . ($a['aktif'] ? '' : ' (nonaktif)'), 0, 255), ip(), ua()]);
             return 'Akun atau kata sandi salah, atau akun ini tidak punya akses.';
         }
         session_regenerate_id(true);
         $_SESSION['uid'] = -(int)$a['id']; $_SESSION['nama'] = (string)$a['nama']; $_SESSION['aktif'] = time(); $_SESSION['csrf'] = bin2hex(random_bytes(24));
         q('UPDATE akun_lihat SET login_terakhir = NOW() WHERE id = ?', [$a['id']]);
-        user(true); catat_akses('login', null, null, 'akun lihat saja');
+        user(true); catat_akses('login', null, null, $a['peran'] === 'penuh' ? 'akun owner' : 'akun lihat saja');
         return '';
     }
     $erp = env()['ERP_DB'] ?? 'skinlyfe_erp';
@@ -122,7 +122,7 @@ function wajib_login_api(): array {
 }
 /** [10 Nov] Ganti sandi akun lihat saja. Return '' kalau berhasil, selain itu pesan galat. */
 function ganti_sandi(string $lama, string $baru, string $ulang): string {
-    $u = user(); if (!$u || $u['peran'] !== 'lihat') return 'Akun ini tidak memakai kata sandi lokal.';
+    $u = user(); if (!$u || empty($u['lokal'])) return 'Akun ini tidak memakai kata sandi lokal.';
     $a = q('SELECT sandi_hash FROM akun_lihat WHERE id = ?', [-$u['id']])->fetch();
     if (!$a || !password_verify($lama, (string)$a['sandi_hash'])) return 'Kata sandi lama salah.';
     if (mb_strlen($baru) < 8) return 'Kata sandi baru minimal 8 karakter.';

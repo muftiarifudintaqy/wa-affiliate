@@ -1,7 +1,7 @@
 /* [10 Nov] Service worker Inbox Affiliate (PWA): tampilan (CSS/JS/ikon) dari cache supaya cepat dibuka; halaman & data chat SELALU dari jaringan
    (network-first, tidak pernah disimpan: isinya rahasia & berubah terus). Offline: halaman → offline.html, API → {ok:false, offline:true}. */
-const VERSI = 'affiliate-v1';
-const ASET = ['/app.css?v=17', '/app.js?v=13', '/offline.html', '/manifest.webmanifest', '/img/prepare.png', '/img/prepare-bulat.png',
+const VERSI = 'affiliate-v2';
+const ASET = ['/app.css?v=18', '/app.js?v=14', '/offline.html', '/manifest.webmanifest', '/img/prepare.png', '/img/prepare-bulat.png',
   '/img/ikon-192.png', '/img/ikon-512.png', '/img/apple-touch-icon.png'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(VERSI).then(c => c.addAll(ASET)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== VERSI).map(k => caches.delete(k)))).then(() => self.clients.claim())); });

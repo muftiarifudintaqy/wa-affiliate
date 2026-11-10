@@ -235,6 +235,43 @@ case 'waktu_balas':
               'orang' => $orang, 'nomor' => $per_nomor, 'terlama' => array_slice($terlama, 0, 20),
               'dihitung_at' => q('SELECT MAX(dihitung_at) FROM balasan')->fetchColumn()]);
 
+// ---------------- [10 Nov] kelola akun lokal (owner / lihat saja) — hanya peran penuh (gerbang AKSI_LIHAT di atas). Sandi tidak pernah dicatat.
+case 'akun_daftar':
+    $lokal = q('SELECT id, username, nama, peran, aktif, wajib_ganti, dibuat_at, sandi_diganti_at, login_terakhir FROM akun_lihat ORDER BY aktif DESC, peran DESC, id')->fetchAll();
+    $erp = env()['ERP_DB'] ?? 'skinlyfe_erp'; $ids = izin_user();
+    $akun_erp = $ids ? q("SELECT id, username, full_name nama FROM `$erp`.user WHERE id IN (" . implode(',', array_fill(0, count($ids), '?')) . ')', $ids)->fetchAll() : [];
+    json_out(['ok' => true, 'lokal' => $lokal, 'erp' => $akun_erp, 'saya' => $u['id']]);
+case 'akun_tambah': case 'akun_reset': case 'akun_ubah':
+    if (!$post) json_out(['ok' => false], 405);
+    $peran = $in('peran') === 'lihat' ? 'lihat' : 'penuh';
+    if ($aksi === 'akun_tambah') {
+        $un = strtolower(trim((string)$in('username', ''))); $nama = trim(mb_substr((string)$in('nama', ''), 0, 120)); $sandi = (string)$in('sandi', '');
+        if (!preg_match('/^[a-z0-9._-]{3,60}$/', $un)) json_out(['ok' => false, 'pesan' => 'Username 3-60 karakter: huruf kecil, angka, titik, _ atau -']);
+        if ($nama === '') json_out(['ok' => false, 'pesan' => 'Nama wajib diisi']);
+        if (mb_strlen($sandi) < 8) json_out(['ok' => false, 'pesan' => 'Kata sandi awal minimal 8 karakter']);
+        if (q('SELECT 1 FROM akun_lihat WHERE username = ?', [$un])->fetchColumn()) json_out(['ok' => false, 'pesan' => 'Username sudah dipakai']);
+        q('INSERT INTO akun_lihat (username, nama, peran, sandi_hash, wajib_ganti, aktif, dibuat_at) VALUES (?, ?, ?, ?, 1, 1, NOW())', [$un, $nama, $peran, password_hash($sandi, PASSWORD_DEFAULT)]);
+        catat_akses('akun', null, null, "tambah $un ($nama), peran $peran");
+        json_out(['ok' => true]);
+    }
+    $a = q('SELECT id, username, nama, peran, aktif FROM akun_lihat WHERE id = ?', [$int('id')])->fetch();
+    if (!$a) json_out(['ok' => false, 'pesan' => 'Akun tidak ditemukan'], 404);
+    $diri = -(int)$a['id'] === $u['id'];
+    if ($aksi === 'akun_reset') {   // sandi sementara dari owner; pemilik akun wajib menggantinya saat login berikutnya
+        $sandi = (string)$in('sandi', ''); if (mb_strlen($sandi) < 8) json_out(['ok' => false, 'pesan' => 'Kata sandi sementara minimal 8 karakter']);
+        q('UPDATE akun_lihat SET sandi_hash = ?, wajib_ganti = 1 WHERE id = ?', [password_hash($sandi, PASSWORD_DEFAULT), $a['id']]);
+        catat_akses('akun', null, null, "reset sandi {$a['username']} (wajib ganti saat login)");
+        json_out(['ok' => true]);
+    }
+    $ubah = [];
+    if ($in('peran') !== null && $peran !== $a['peran']) { if ($diri) json_out(['ok' => false, 'pesan' => 'Peran akun sendiri tidak bisa diturunkan']); $ubah['peran'] = $peran; }
+    if ($in('aktif') !== null && (int)$in('aktif') !== (int)$a['aktif']) { if ($diri) json_out(['ok' => false, 'pesan' => 'Akun sendiri tidak bisa dinonaktifkan']); $ubah['aktif'] = (int)$in('aktif') ? 1 : 0; }
+    if ($in('nama') !== null && trim((string)$in('nama')) !== '' && trim((string)$in('nama')) !== $a['nama']) $ubah['nama'] = trim(mb_substr((string)$in('nama'), 0, 120));
+    if (!$ubah) json_out(['ok' => true]);
+    q('UPDATE akun_lihat SET ' . implode(', ', array_map(fn($k) => "$k = ?", array_keys($ubah))) . ' WHERE id = ?', array_merge(array_values($ubah), [$a['id']]));
+    catat_akses('akun', null, null, "ubah {$a['username']}: " . implode(', ', array_map(fn($k, $v) => "$k=$v", array_keys($ubah), $ubah)));
+    json_out(['ok' => true]);
+
 case 'audit':
     $r = q('SELECT a.*, n.label nomor_label FROM audit_web a LEFT JOIN nomor n ON n.id = a.nomor_id ORDER BY a.id DESC LIMIT 200')->fetchAll();
     $l = q('SELECT * FROM akses_log ORDER BY id DESC LIMIT 200')->fetchAll();

@@ -49,8 +49,8 @@ function hitung_balasan(array $chat_ids): int {
                 $via = $p['dari_web'] ? 'web' : ($p['dari_riwayat'] ? 'riwayat' : 'hp');
                 $uid = $via === 'web' ? (int)($web[$p['wa_id']]['user_id'] ?? $p['web_user_id']) ?: null : null;
                 $unama = $via === 'web' ? ($web[$p['wa_id']]['user_nama'] ?? null) : null;
-                if ($via === 'web' && !$unama && $uid) {
-                    if (!array_key_exists($uid, $nama_erp)) $nama_erp[$uid] = q("SELECT full_name FROM `$erp`.user WHERE id = ?", [$uid])->fetchColumn() ?: null;
+                if ($via === 'web' && !$unama && $uid) {   // uid negatif = akun lokal (owner) di akun_lihat
+                    if (!array_key_exists($uid, $nama_erp)) $nama_erp[$uid] = ($uid < 0 ? q('SELECT nama FROM akun_lihat WHERE id = ?', [-$uid]) : q("SELECT full_name FROM `$erp`.user WHERE id = ?", [$uid]))->fetchColumn() ?: null;
                     $unama = $nama_erp[$uid];
                 }
                 $gil[] = $buka + ['balas_pesan_id' => (int)$p['id'], 'balas' => (int)$p['t'], 'via' => $via, 'uid' => $uid, 'unama' => $unama];
