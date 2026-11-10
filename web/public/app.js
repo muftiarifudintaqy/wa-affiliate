@@ -17,6 +17,19 @@
   const avaChat = (c) => { const n = namaChat(c), ini = ((n.replace(/^\+/, '').match(/[A-Za-z0-9]/g) || ['#']).slice(0, n.match(/\s/) ? 1 : 2).join('') + ((n.split(/\s+/)[1] || '').match(/[A-Za-z]/) || [''])[0]).toUpperCase().slice(0, 2);
     return c.foto_ada == 1 ? `<img src="/media.php?kontak=${c.id}&v=${c.foto_v || 0}" alt="" loading="lazy">` : esc(ini); };
   const durasi = (s) => { if (s == null) return '–'; s = Number(s); return s < 60 ? s + ' dtk' : s < 3600 ? Math.round(s / 60) + ' mnt' : (s / 3600).toFixed(1).replace('.', ',') + ' jam'; };
+  // [10 Nov] waktu balas: detik di jam kerja (Sen-Jum 08-17, Sab 08-12, WIB) — sama dengan detik_kerja() di server
+  const WIB = 7 * 3600e3, tsWib = (t) => Date.parse(String(t).replace(' ', 'T') + '+07:00');
+  function detikKerja(a, b) {
+    if (b <= a) return 0;
+    let tot = 0; const d0 = new Date(a + WIB); let d = Date.UTC(d0.getUTCFullYear(), d0.getUTCMonth(), d0.getUTCDate()) - WIB;   // tengah malam WIB hari a
+    for (; d <= b; d += 86400e3) {
+      const h = new Date(d + WIB).getUTCDay(); if (h === 0) continue;
+      const x = Math.max(a, d + 8 * 3600e3), y = Math.min(b, d + (h === 6 ? 12 : 17) * 3600e3); if (y > x) tot += y - x;
+    }
+    return Math.round(tot / 1000);
+  }
+  // durasi jam kerja: "25m", "1j 20m"; ≥ 100 jam → "N hari kerja" (1 hari kerja = 9 jam) supaya chat yang ditinggal lama tetap terbaca
+  const lama = (s) => { if (s == null) return '–'; s = Number(s); if (s < 60) return '< 1m'; const m = Math.round(s / 60); if (m >= 6000) return Math.round(m / 540) + ' hari kerja'; return m < 60 ? m + 'm' : Math.floor(m / 60) + 'j' + (m % 60 ? ' ' + (m % 60) + 'm' : ''); };
   const toast = (t) => { const e = $('#toast'); e.textContent = t; e.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => e.hidden = true, 3500); };
 
   async function api(aksi, p, form) {
@@ -51,6 +64,9 @@
   const labelSlot = (n) => String(n.label || '').trim() || 'Aff ' + n.id;
   // nomor WA akun yang tertaut di slot (bukan nomor kontak); slot yang belum pernah tertaut → kosong
   const nomorSlot = (n) => n.jid ? nomorHp(n.jid) : '';
+  // [10 Nov] 2 slot bisa berlabel sama ("Indah Aff" …9944 & …6646): di semua tabel & chip ditulis label + 4 digit akhir nomor
+  const namaSlot = (n) => labelSlot(n) + (nomorSlot(n) ? ' …' + nomorSlot(n).slice(-4) : '');
+  const namaNomorId = (id, cadangan) => { const n = S.nomor.find(x => String(x.id) === String(id)); return n ? namaSlot(n) : (cadangan || ''); };
   // label pendek "Aff 1" untuk sidebar, inisial dari nama di belakang tanda "-" (mis. "Aff 1 - Natasya" → N)
   const labelPendek = (l) => String(l || '').split(/\s+[-–—]\s+/)[0].slice(0, 10);
   const inisial = (n) => { const l = labelSlot(n), b = l.split(/\s+[-–—]\s+/)[1]; return b ? b.trim()[0].toUpperCase() : 'A' + ((l.match(/\d+/) || [n.id])[0]); };
@@ -79,13 +95,17 @@
   function renderRingkas(judulAkun) {
     const box = $('#ringkas'); if (!box) return;
     const tot = S.nomor.reduce((a, n) => a + (Number(n.chat_belum_dibalas) || 0), 0), angka = (x, putus) => `<b class="${x > 0 ? (putus ? 'redup' : 'merah') : ''}">${x}</b>`;
-    box.innerHTML = `<span class="r-judul">Belum dibalas:</span> <button type="button" data-n="semua" class="${S.nomorAktif === 'semua' ? 'on' : ''}" title="Semua akun">${angka(tot)}</button>` +
-      S.nomor.map(n => { const putus = keadaan(n) === 'terputus'; return `<span class="r-sep">·</span><button type="button" data-n="${n.id}" class="${String(S.nomorAktif) === String(n.id) ? 'on' : ''} ${putus ? 'putus' : ''}" title="${esc(judulAkun(n))}${nomorSlot(n) ? ' · ' + esc(nomorSlot(n)) : ''}${putus ? ' · Terputus' : ''}">${putus ? IKON_PUTUS : ''}${esc(labelPendek(labelSlot(n)).replace(/\s+/g, ''))}${nomorSlot(n) ? ` <span class="r-no">${esc(nomorSlot(n))}</span>` : ''} ${angka(Number(n.chat_belum_dibalas) || 0, putus)}</button>`; }).join('');
+    // [10 Nov] chip per akun (geser di HP, dilipat rapi di layar lebar): "Indah Aff …9944 92"; akun belum pernah ditautkan & tanpa chat tidak ditampilkan
+    box.innerHTML = `<span class="r-judul">Belum dibalas</span><div class="r-chip"><button type="button" data-n="semua" class="${S.nomorAktif === 'semua' ? 'on' : ''}" title="Semua akun"><span class="r-nm">Semua</span>${angka(tot)}</button>` +
+      S.nomor.filter(n => n.jid || Number(n.chat_belum_dibalas) > 0).map(n => { const putus = keadaan(n) === 'terputus'; return `<button type="button" data-n="${n.id}" class="${String(S.nomorAktif) === String(n.id) ? 'on' : ''} ${putus ? 'putus' : ''}" title="${esc(judulAkun(n))}${nomorSlot(n) ? ' · ' + esc(nomorSlot(n)) : ''}${putus ? ' · Terputus (mode baca)' : ''}">${putus ? IKON_PUTUS : ''}<span class="r-nm">${esc(labelSlot(n))}</span>${nomorSlot(n) ? `<span class="r-no">…${esc(nomorSlot(n).slice(-4))}</span>` : ''}${angka(Number(n.chat_belum_dibalas) || 0, putus)}</button>`; }).join('') + '</div>';
   }
   $('#ringkas').addEventListener('click', (e) => { const b = e.target.closest('button[data-n]'); if (!b) return; S.nomorAktif = b.dataset.n; S.jejakChats = ''; renderRel(); muatChats(); });
   // filter "Belum dibalas" (akun terpilih atau Semua)
   S.belum = false;
   $('#saringBelum').addEventListener('click', () => { S.belum = !S.belum; $('#saringBelum').setAttribute('aria-pressed', String(S.belum)); $('#saringBelum').classList.toggle('on', S.belum); S.jejakChats = ''; muatChats(); });
+  // [10 Nov] urutan "Paling lama menunggu": chat belum dibalas, yang menunggu paling lama di atas
+  S.urutTunggu = false;
+  $('#urutTunggu').addEventListener('click', () => { S.urutTunggu = !S.urutTunggu; $('#urutTunggu').setAttribute('aria-pressed', String(S.urutTunggu)); $('#urutTunggu').classList.toggle('on', S.urutTunggu); S.jejakChats = ''; muatChats(); });
   // pita kartu: "Semua" + Aff 1–6 (grid di desktop, geser horizontal di HP); klik = filter chat
   function renderKartu() {
     const box = $('#kartuGrid'); if (!box) return;
@@ -106,29 +126,40 @@
   $$('.rel-btn[data-hal]').forEach(b => b.addEventListener('click', () => gantiHal(b.dataset.hal)));
   function gantiHal(h) {
     S.hal = h; $$('.rel-btn[data-hal]').forEach(b => b.classList.toggle('on', b.dataset.hal === h));
-    $('#halInbox').hidden = h !== 'inbox'; $('#halRingkasan').hidden = h !== 'ringkasan'; $('#halHubungkan').hidden = h !== 'hubungkan'; $('#halAudit').hidden = h !== 'audit';
-    if (h === 'ringkasan') renderRingkasan(); if (h === 'hubungkan') renderHubungkan(); if (h === 'audit') renderAudit();
+    $('#halInbox').hidden = h !== 'inbox'; $('#halWaktu').hidden = h !== 'waktu'; $('#halRingkasan').hidden = h !== 'ringkasan'; $('#halHubungkan').hidden = h !== 'hubungkan'; $('#halAudit').hidden = h !== 'audit';
+    if (h !== 'inbox') tutupObrolan();
+    if (h === 'waktu') renderWaktu(); if (h === 'ringkasan') renderRingkasan(); if (h === 'hubungkan') renderHubungkan(); if (h === 'audit') renderAudit();
   }
 
   // ---------------------------------------------------------------- daftar chat
   async function muatChats() {
-    const j = await api('chats', S.belum ? { nomor: S.nomorAktif, belum: 1 } : { nomor: S.nomorAktif }); if (!j.ok) return;
-    const jejak = S.nomorAktif + (S.belum ? '|b' : '') + JSON.stringify(j.chats);
+    const p = { nomor: S.nomorAktif }; if (S.belum) p.belum = 1; if (S.urutTunggu) p.urut = 'tunggu';
+    const j = await api('chats', p); if (!j.ok) return;
+    if (j.sekarang) S.selisihJam = j.sekarang * 1000 - Date.now();
+    // badge "menunggu …" ikut berjalan: daftar digambar ulang tiap menit walau datanya sama
+    const jejak = S.nomorAktif + (S.belum ? '|b' : '') + (S.urutTunggu ? '|t' : '') + Math.floor(Date.now() / 60e3) + JSON.stringify(j.chats);
     if (jejak === S.jejakChats) return;            // tidak berubah → jangan gambar ulang (hover & klik tidak terganggu)
     S.jejakChats = jejak; S.chats = j.chats; renderChats(); renderRel();
   }
   function renderChats() {
     const ul = $('#daftarChat');
-    if (!S.chats.length) { ul.innerHTML = S.belum ? '<li class="kosong-obrolan kecil">Semua chat sudah dibalas.</li>' : '<li class="kosong-obrolan kecil">Belum ada chat. Tautkan nomor di halaman Hubungkan (🔗).</li>'; return; }
+    const kini = Date.now() + (S.selisihJam || 0);
+    if (!S.chats.length) { ul.innerHTML = S.belum || S.urutTunggu ? '<li class="kosong-obrolan kecil">Semua chat sudah dibalas.</li>' : '<li class="kosong-obrolan kecil">Belum ada chat. Tautkan nomor di halaman Hubungkan (🔗).</li>'; return; }
     ul.innerHTML = S.chats.map(c => {
       const nama = namaChat(c);
       const hariIni = c.pesan_terakhir_at && c.pesan_terakhir_at.slice(0, 10) === new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
       return `<li class="chat-i ${S.chat && S.chat.id == c.id ? 'on' : ''}" data-id="${c.id}">
         <div class="ava ${c.jenis === 'grup' ? 'grup' : ''}">${avaChat(c)}</div>
-        <div style="min-width:0"><div class="chat-nama" title="${esc(c.nama_simpan ? 'Disimpan sebagai: ' + c.nama_simpan : (c.push_name ? 'Nama WA: ' + c.push_name : ''))}">${esc(nama)}</div><div class="chat-no">${esc(nomorChat(c))}</div><div class="chat-cup">${c.cuplikan_dari_tim == 1 ? '↪ ' : ''}${esc(c.cuplikan || '')}</div></div>
+        <div class="chat-tengah"><div class="chat-nama" title="${esc(c.nama_simpan ? 'Disimpan sebagai: ' + c.nama_simpan : (c.push_name ? 'Nama WA: ' + c.push_name : ''))}">${esc(nama)}</div><div class="chat-no">${esc(nomorChat(c))}${S.nomorAktif === 'semua' ? ` <span class="tag-n">${esc(namaNomorId(c.nomor_id, c.nomor_label))}</span>` : ''}</div><div class="chat-cup">${c.cuplikan_dari_tim == 1 ? '↪ ' : ''}${esc(c.cuplikan || '')}</div>${tungguHtml(c, kini)}</div>
         <div class="chat-kanan"><span class="chat-jam">${c.pesan_terakhir_at ? (hariIni ? c.pesan_terakhir_at.slice(11, 16) : c.pesan_terakhir_at.slice(8, 10) + '/' + c.pesan_terakhir_at.slice(5, 7)) : ''}</span>
-          ${S.nomorAktif === 'semua' ? `<span class="tag-n">${esc(c.nomor_label)}</span>` : ''}${Number(c.belum_dibalas) > 0 ? `<span class="lencana" title="belum dibalas sejak ${esc(c.belum_dibalas_sejak)}">${c.belum_dibalas}</span>` : ''}</div></li>`;
+          ${Number(c.belum_dibalas) > 0 ? `<span class="lencana" title="${c.belum_dibalas} pesan belum dibalas sejak ${esc(c.belum_dibalas_sejak)}">${c.belum_dibalas}</span>` : ''}</div></li>`;
     }).join('');
+  }
+  // [10 Nov] badge "menunggu 1j 20m" (jam kerja) untuk chat pribadi yang belum dibalas: oranye > 30 menit, merah > 2 jam
+  function tungguHtml(c, kini) {
+    if (!c.belum_dibalas_sejak || c.jenis !== 'pribadi') return '';
+    const s = detikKerja(tsWib(c.belum_dibalas_sejak), kini), kls = s > 7200 ? 'merah' : s > 1800 ? 'oranye' : '';
+    return `<span class="tunggu ${kls}" title="Pesan pertama yang belum dibalas masuk ${esc(c.belum_dibalas_sejak.slice(0, 16))} · dihitung jam kerja (Sen–Jum 08–17, Sab 08–12)">menunggu ${lama(s)}</span>`;
   }
   $('#daftarChat').addEventListener('click', (e) => { const li = e.target.closest('.chat-i'); if (li) bukaChat(Number(li.dataset.id)); });
 
@@ -141,8 +172,8 @@
       if (s.length < 2) { box.hidden = true; $('#daftarChat').hidden = false; return; }
       const [j, c] = await Promise.all([api('cari', { q: s }), api('chats', { nomor: S.nomorAktif, cari: s })]);
       const re = new RegExp('(' + s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
-      box.innerHTML = (c.chats || []).map(x => `<div class="hasil-i" data-chat="${x.id}"><b>${esc(namaChat(x))}</b> <span class="tag-n">${esc(x.nomor_label)}</span><div class="kecil">${esc(nomorChat(x))}${x.nama_simpan ? ' · disimpan sebagai ' + esc(x.nama_simpan) : ''}${x.push_name ? ' · nama WA ' + esc(x.push_name) : ''}</div></div>`).join('') +
-        (j.hasil || []).map(x => `<div class="hasil-i" data-chat="${x.chat_id}"><b>${esc(namaChat(x))}</b> <span class="tag-n">${esc(x.nomor_label)}</span> <span class="kecil mono">${esc(x.waktu)}</span><div class="kecil">${x.dari_tim == 1 ? 'Tim: ' : ''}${esc(x.teks || '').replace(re, '<mark>$1</mark>')}</div></div>`).join('') || '<div class="hasil-i kecil">Tidak ada hasil.</div>';
+      box.innerHTML = (c.chats || []).map(x => `<div class="hasil-i" data-chat="${x.id}"><b>${esc(namaChat(x))}</b> <span class="tag-n">${esc(namaNomorId(x.nomor_id, x.nomor_label))}</span><div class="kecil">${esc(nomorChat(x))}${x.nama_simpan ? ' · disimpan sebagai ' + esc(x.nama_simpan) : ''}${x.push_name ? ' · nama WA ' + esc(x.push_name) : ''}</div></div>`).join('') +
+        (j.hasil || []).map(x => `<div class="hasil-i" data-chat="${x.chat_id}"><b>${esc(namaChat(x))}</b> <span class="tag-n">${esc(namaNomorId(x.nomor_id, x.nomor_label))}</span> <span class="kecil mono">${esc(x.waktu)}</span><div class="kecil">${x.dari_tim == 1 ? 'Tim: ' : ''}${esc(x.teks || '').replace(re, '<mark>$1</mark>')}</div></div>`).join('') || '<div class="hasil-i kecil">Tidak ada hasil.</div>';
       box.hidden = false; $('#daftarChat').hidden = true;
     }, 350);
   });
@@ -151,12 +182,16 @@
   // ---------------------------------------------------------------- isi percakapan
   async function bukaChat(id) {
     S.chat = { id }; S.kutip = null; $('#kutipBar').hidden = true; S.jejak = ''; S.palingLama = 0;
-    $('#halInbox').classList.add('buka'); $('#kosongObrolan').hidden = true; $('#obrolanAtas').hidden = false;   // kolom tulis dibuka muatPesan() hanya kalau nomor tersambung
+    $('#halInbox').classList.add('buka'); app.classList.add('chat-buka'); $('#kosongObrolan').hidden = true; $('#obrolanAtas').hidden = false;   // kolom tulis dibuka muatPesan() hanya kalau nomor tersambung
     $$('.chat-i').forEach(li => li.classList.toggle('on', Number(li.dataset.id) === id));
     await muatPesan(true);
     $('#isiPesan').scrollTop = 1e9; if (S.bisaBalas) $('#ketik').focus();
   }
-  $('#kembali').addEventListener('click', () => { $('#halInbox').classList.remove('buka'); });
+  // [10 Nov] di HP obrolan terbuka layar penuh (baris nomor disembunyikan), tombol ← kembali ke daftar
+  function tutupObrolan() { $('#halInbox').classList.remove('buka'); app.classList.remove('chat-buka'); }
+  $('#kembali').addEventListener('click', tutupObrolan);
+  // kotak tulis tetap di atas keyboard HP: tinggi aplikasi ikut visualViewport
+  if (window.visualViewport) { const pas = () => { document.documentElement.style.setProperty('--tinggi', Math.round(visualViewport.height) + 'px'); if (visualViewport.offsetTop === 0 && scrollY) scrollTo(0, 0); }; visualViewport.addEventListener('resize', pas); pas(); }
   $('#bannerPutus').addEventListener('click', (e) => { if (e.target.closest('[data-ke-hubungkan]')) gantiHal('hubungkan'); });
   async function muatPesan(pertama) {
     if (!S.chat) return;
@@ -169,7 +204,7 @@
     const ban = $('#bannerPutus'); ban.hidden = S.bisaBalas;
     if (!S.bisaBalas) ban.innerHTML = `${IKON_PUTUS}<span>${kc === 'perlu_scan' || kc === 'menghubungkan' ? '<b>Nomor ini sedang menyambung</b> — balas setelah QR dipindai &amp; tersambung.' : '<b>Nomor ini sedang terputus</b> — scan ulang untuk balas.'} Chat &amp; foto tetap bisa dibaca.</span><button type="button" class="btn" data-ke-hubungkan>Scan ulang</button>`;
     $('#namaChat').textContent = namaChat(j.chat); pasang($('#avaChat'), avaChat(j.chat)); $('#avaChat').classList.toggle('grup', j.chat.jenis === 'grup');
-    pasang($('#infoChat'), `${esc(nomorChat(j.chat))}${j.chat.jenis !== 'grup' ? ` · Disimpan sebagai: <b>${esc(j.chat.nama_simpan || '–')}</b> · Nama WA: <b>${esc(j.chat.push_name || '–')}</b>` : ''} · <span class="tag-n">${esc(j.chat.nomor_label)}</span> · rata-rata balas ${durasi(j.chat.waktu_balas_rata_detik)}${j.chat.belum_dibalas_sejak ? ` · <b style="color:var(--oranye)">belum dibalas sejak ${esc(j.chat.belum_dibalas_sejak.slice(11, 19))}</b>` : ''}`);
+    pasang($('#infoChat'), `${esc(nomorChat(j.chat))}${j.chat.jenis !== 'grup' ? ` · Disimpan sebagai: <b>${esc(j.chat.nama_simpan || '–')}</b> · Nama WA: <b>${esc(j.chat.push_name || '–')}</b>` : ''} · <span class="tag-n">${esc(namaNomorId(j.chat.nomor_id, j.chat.nomor_label))}</span> · rata-rata balas ${durasi(j.chat.waktu_balas_rata_detik)}${j.chat.belum_dibalas_sejak ? ` · <b style="color:var(--oranye)">belum dibalas sejak ${esc(j.chat.belum_dibalas_sejak.slice(0, 16))}</b>` : ''}`);
     const jejak = String(S.bisaBalas) + JSON.stringify(j.pesan.map(p => [p.id, p.status, p.teks, p.dihapus_semua_at, p.reaksi, p.media_status, p.jumlah_versi]));
     if (jejak === S.jejak && pertama !== true) return;
     S.jejak = jejak;
@@ -419,20 +454,53 @@
   // ---------------------------------------------------------------- Ringkasan & Audit
   async function renderRingkasan(dari, sampai) {
     const box = $('#halRingkasan'), j = await api('ringkasan', dari ? { dari, sampai } : {});
-    const per = {}; (j.baris || []).forEach(r => { const k = r.label; per[k] = per[k] || { cm: 0, ck: 0, kb: 0, bl: 0, bal: [], n: 0 }; const x = per[k]; x.cm += +r.chat_masuk; x.ck += +r.chat_keluar; x.kb += +r.kontak_baru; x.bl += +r.belum_dibalas_1jam; if (r.waktu_balas_rata_detik != null) x.bal.push(+r.waktu_balas_rata_detik); });
+    const per = {}; (j.baris || []).forEach(r => { const k = namaNomorId(r.nomor_id, r.label); per[k] = per[k] || { cm: 0, ck: 0, kb: 0, bl: 0, bal: [], n: 0 }; const x = per[k]; x.cm += +r.chat_masuk; x.ck += +r.chat_keluar; x.kb += +r.kontak_baru; x.bl += +r.belum_dibalas_1jam; if (r.waktu_balas_rata_detik != null) x.bal.push(+r.waktu_balas_rata_detik); });
     box.innerHTML = `<h2>Ringkasan harian</h2><p>Chat pribadi per nomor per hari. Waktu balas = jarak pesan kontak ke balasan tim berikutnya. Dihitung ulang tiap 10 menit.</p>
       <div class="filter"><label>Dari <input type="date" id="rDari" value="${esc(j.dari)}"></label><label>Sampai <input type="date" id="rSampai" value="${esc(j.sampai)}"></label><button class="btn" id="rTampil">Tampilkan</button></div>
       <div class="tb-bungkus"><table class="tb"><thead><tr><th>Nomor</th><th>Chat masuk</th><th>Chat keluar</th><th>Kontak baru</th><th>Rata-rata balas</th><th>Belum dibalas &gt; 1 jam</th></tr></thead><tbody>
       ${Object.keys(per).map(k => { const x = per[k]; return `<tr><td>${esc(k)}</td><td class="n">${x.cm}</td><td class="n">${x.ck}</td><td class="n">${x.kb}</td><td class="n">${x.bal.length ? durasi(Math.round(x.bal.reduce((a, b) => a + b, 0) / x.bal.length)) : '–'}</td><td class="n">${x.bl}</td></tr>`; }).join('') || '<tr><td colspan="6">Belum ada data.</td></tr>'}</tbody></table></div>
       <div class="tb-bungkus"><table class="tb"><thead><tr><th>Tanggal</th><th>Nomor</th><th>Chat masuk</th><th>Chat keluar</th><th>Pesan masuk</th><th>Pesan keluar</th><th>Kontak baru</th><th>Rata-rata balas</th><th>Belum dibalas &gt; 1 jam</th></tr></thead><tbody>
-      ${(j.baris || []).map(r => `<tr><td class="mono">${esc(r.tanggal)}</td><td>${esc(r.label)}</td><td class="n">${r.chat_masuk}</td><td class="n">${r.chat_keluar}</td><td class="n">${r.pesan_masuk}</td><td class="n">${r.pesan_keluar}</td><td class="n">${r.kontak_baru}</td><td class="n">${durasi(r.waktu_balas_rata_detik)}</td><td class="n">${r.belum_dibalas_1jam}</td></tr>`).join('')}</tbody></table></div>`;
+      ${(j.baris || []).map(r => `<tr><td class="mono">${esc(r.tanggal)}</td><td>${esc(namaNomorId(r.nomor_id, r.label))}</td><td class="n">${r.chat_masuk}</td><td class="n">${r.chat_keluar}</td><td class="n">${r.pesan_masuk}</td><td class="n">${r.pesan_keluar}</td><td class="n">${r.kontak_baru}</td><td class="n">${durasi(r.waktu_balas_rata_detik)}</td><td class="n">${r.belum_dibalas_1jam}</td></tr>`).join('')}</tbody></table></div>`;
     $('#rTampil').onclick = () => renderRingkasan($('#rDari').value, $('#rSampai').value);
   }
+  // ---------------------------------------------------------------- [10 Nov] Waktu Balas
+  S.rentangWaktu = 'hari';
+  async function renderWaktu() {
+    const box = $('#halWaktu');
+    if (!box.dataset.siap) { box.dataset.siap = 1; box.innerHTML = '<h2>Waktu balas</h2><p>Siapa yang lama membalas. Waktu balas = jam balasan pertama tim − jam pesan masuk pertama yang belum dibalas, <b>hanya jam kerja</b> (Senin–Jumat 08:00–17:00, Sabtu 08:00–12:00). Chat pribadi saja, menurut jam pesan masuk.</p><div class="filter" id="wRentang" role="group" aria-label="Rentang"><button class="saring" data-r="hari">Hari ini</button><button class="saring" data-r="7">7 hari</button><button class="saring" data-r="bulan">Bulan ini</button><span class="kecil" id="wInfo"></span></div><div id="wIsi"><p class="kecil">Memuat…</p></div>'; }
+    $$('#wRentang [data-r]').forEach(b => { b.classList.toggle('on', b.dataset.r === S.rentangWaktu); b.setAttribute('aria-pressed', String(b.dataset.r === S.rentangWaktu)); });
+    const j = await api('waktu_balas', { rentang: S.rentangWaktu }); if (!j.ok) { $('#wIsi').innerHTML = '<p>Gagal memuat.</p>'; return; }
+    const t = j.total, kls = (s) => s > 7200 ? 'merah' : s > 1800 ? 'oranye' : '';
+    const dur = (s) => s == null ? '–' : `<span class="dur ${kls(s)}">${lama(s)}</span>`;
+    const jam = (x) => x ? (x.slice(0, 10) === new Date(Date.now() + WIB).toISOString().slice(0, 10) ? x.slice(11, 16) : x.slice(8, 10) + '/' + x.slice(5, 7) + ' ' + x.slice(11, 16)) : '–';
+    $('#wInfo').textContent = 'Diperbarui tiap menit' + (j.dihitung_at ? ' · terakhir ' + j.dihitung_at.slice(11, 16) : '');
+    const angkaKartu = (b, l, k) => `<div class="w-kartu ${k || ''}"><b>${b}</b><span>${l}</span></div>`;
+    $('#wIsi').innerHTML = `<div class="w-ringkas">
+        ${angkaKartu(lama(t.rata), 'rata-rata', kls(t.rata))}${angkaKartu(lama(t.median), 'median')}${angkaKartu(lama(t.terlama), 'terlama', kls(t.terlama))}
+        ${angkaKartu(t.lebih30, 'chat &gt; 30 menit', t.lebih30 ? 'oranye' : '')}${angkaKartu(t.lebih2j, 'chat &gt; 2 jam', t.lebih2j ? 'merah' : '')}${angkaKartu(t.belum, 'belum dibalas', t.belum ? 'merah' : '')}
+        ${angkaKartu(t.persen_hp == null ? '–' : String(t.persen_hp).replace('.', ',') + '%', `balasan lewat HP (${t.lewat_hp}/${t.dibalas}) — orangnya belum bisa dilacak`, 'hp')}</div>
+      <h3>Per orang <span class="kecil">— urut dari yang paling lama</span></h3>
+      <p class="kecil">Orang = akun ERP yang membalas lewat web ini. Balasan yang dikirim langsung dari HP (atau WhatsApp di perangkat lain) tidak membawa nama pengirim, jadi ditulis <b>dari HP – nomor</b>.</p>
+      <div class="tb-bungkus"><table class="tb tb-w"><thead><tr><th>Pembalas</th><th>Lewat</th><th>Chat dibalas</th><th>Rata-rata</th><th>Median</th><th>Terlama</th><th>&gt; 30 mnt</th><th>&gt; 2 jam</th></tr></thead><tbody>
+      ${j.orang.map(o => `<tr><td>${esc(o.nama)}${o.riwayat ? ` <span class="kecil" title="balasan yang masuk lewat sinkron riwayat WhatsApp">(${o.riwayat} dari riwayat)</span>` : ''}</td><td><span class="lewat ${o.lewat}">${o.lewat === 'web' ? 'web' : 'HP'}</span></td><td class="n">${o.dibalas}</td><td class="n">${dur(o.rata)}</td><td class="n">${dur(o.median)}</td><td class="n">${dur(o.terlama)}</td><td class="n">${o.lebih30}</td><td class="n">${o.lebih2j}</td></tr>`).join('') || '<tr><td colspan="8">Belum ada balasan di rentang ini.</td></tr>'}</tbody></table></div>
+      <h3>Per nomor</h3>
+      <div class="tb-bungkus"><table class="tb tb-w"><thead><tr><th>Nomor</th><th>Chat masuk</th><th>Dibalas</th><th>Belum dibalas</th><th>Rata-rata</th><th>Median</th><th>Terlama</th><th>&gt; 30 mnt</th><th>&gt; 2 jam</th><th>Lewat HP</th></tr></thead><tbody>
+      ${j.nomor.map(n => `<tr><td>${esc(n.nama)}</td><td class="n">${n.giliran}</td><td class="n">${n.dibalas}</td><td class="n">${n.belum ? `<span class="dur merah" title="menunggu terlama ${lama(n.tunggu_terlama)} (jam kerja)">${n.belum}</span>` : 0}</td><td class="n">${dur(n.rata)}</td><td class="n">${dur(n.median)}</td><td class="n">${dur(n.terlama)}</td><td class="n">${n.lebih30}</td><td class="n">${n.lebih2j}</td><td class="n">${n.persen_hp == null ? '–' : String(n.persen_hp).replace('.', ',') + '%'}</td></tr>`).join('') || '<tr><td colspan="10">Belum ada chat masuk di rentang ini.</td></tr>'}</tbody></table></div>
+      <h3>20 chat paling lama dibalas</h3>
+      <div class="tb-bungkus"><table class="tb tb-w"><thead><tr><th>Kontak</th><th>Nomor</th><th>Masuk</th><th>Dibalas</th><th>Durasi</th><th>Dibalas oleh</th></tr></thead><tbody>
+      ${j.terlama.map(x => `<tr class="w-buka" data-chat="${x.chat_id}" tabindex="0" title="Buka chat"><td><b>${esc(x.kontak)}</b>${x.kontak_no && x.kontak_no !== x.kontak ? `<div class="kecil">${esc(x.kontak_no)}</div>` : ''}</td><td>${esc(x.nomor)}</td><td class="mono">${jam(x.masuk)}</td><td class="mono">${jam(x.balas)}</td><td class="n" title="jam kerja · total ${lama(x.detik_total)}">${dur(x.detik)}</td><td>${esc(x.oleh)}${x.lewat === 'riwayat' ? ' <span class="kecil">(riwayat)</span>' : ''}</td></tr>`).join('') || '<tr><td colspan="6">Belum ada.</td></tr>'}</tbody></table></div>`;
+  }
+  $('#halWaktu').addEventListener('click', (e) => {
+    const r = e.target.closest('[data-r]'); if (r) { S.rentangWaktu = r.dataset.r; renderWaktu(); return; }
+    const c = e.target.closest('.w-buka'); if (c) { gantiHal('inbox'); bukaChat(Number(c.dataset.chat)); }
+  });
+  $('#halWaktu').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList.contains('w-buka')) { gantiHal('inbox'); bukaChat(Number(e.target.dataset.chat)); } });
+
   async function renderAudit() {
     const j = await api('audit'), box = $('#halAudit');
     box.innerHTML = `<h2>Audit</h2><p>Semua kirim, edit, hapus, reaksi, dan tandai dibaca dari web, serta siapa yang membuka inbox.</p>
       <div class="tb-bungkus"><table class="tb"><thead><tr><th>Jam</th><th>Oleh</th><th>Aksi</th><th>Nomor</th><th>Isi</th><th>Hasil</th><th>IP</th></tr></thead><tbody>
-      ${(j.audit || []).map(a => `<tr><td class="mono">${esc(a.waktu)}</td><td>${esc(a.nama)}</td><td>${esc(a.aksi)}</td><td>${esc(a.nomor_label || '')}</td><td>${esc(a.isi_ringkas || '')}</td><td>${esc(a.hasil || '')}</td><td class="mono">${esc(a.ip)}</td></tr>`).join('') || '<tr><td colspan="7">Belum ada.</td></tr>'}</tbody></table></div>
+      ${(j.audit || []).map(a => `<tr><td class="mono">${esc(a.waktu)}</td><td>${esc(a.nama)}</td><td>${esc(a.aksi)}</td><td>${esc(a.nomor_id ? namaNomorId(a.nomor_id, a.nomor_label) : '')}</td><td>${esc(a.isi_ringkas || '')}</td><td>${esc(a.hasil || '')}</td><td class="mono">${esc(a.ip)}</td></tr>`).join('') || '<tr><td colspan="7">Belum ada.</td></tr>'}</tbody></table></div>
       <h3>Akses</h3><div class="tb-bungkus"><table class="tb"><thead><tr><th>Jam</th><th>Oleh</th><th>Aksi</th><th>Keterangan</th><th>IP</th></tr></thead><tbody>
       ${(j.akses || []).map(a => `<tr><td class="mono">${esc(a.waktu)}</td><td>${esc(a.nama || '')}</td><td>${esc(a.aksi)}</td><td>${esc(a.keterangan || '')}${a.chat_id ? ' chat #' + a.chat_id : ''}</td><td class="mono">${esc(a.ip)}</td></tr>`).join('')}</tbody></table></div>`;
   }

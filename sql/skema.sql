@@ -158,3 +158,19 @@ CREATE TABLE IF NOT EXISTS lid_map (
 
 -- [28 Okt] foto profil kontak/grup (cache per chat, antrean pelan)
 ALTER TABLE chat ADD COLUMN foto_path VARCHAR(255) NULL, ADD COLUMN foto_at DATETIME NULL, ADD COLUMN foto_ada TINYINT(1) NULL, ADD KEY k_foto (foto_at);
+
+-- [10 Nov] waktu balas: 1 baris per "giliran" chat pribadi = pesan masuk pertama yang belum dibalas → balasan tim pertama sesudahnya.
+-- Diisi ulang dari tabel pesan oleh web/cli/hitung-balas.php (cron), jadi data lama ikut terhitung. via: web (user login diketahui),
+-- hp (dikirim dari HP / perangkat lain, orangnya tidak diketahui), riwayat (balasan dari sinkron riwayat WA, orangnya tidak diketahui).
+-- detik_kerja = hanya jam kerja Sen-Jum 08:00-17:00, Sab 08:00-12:00.
+CREATE TABLE IF NOT EXISTS balasan (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  nomor_id TINYINT UNSIGNED NOT NULL,
+  chat_id INT UNSIGNED NOT NULL,
+  masuk_pesan_id BIGINT UNSIGNED NOT NULL, masuk_at DATETIME NOT NULL, jumlah_masuk INT UNSIGNED NOT NULL DEFAULT 1,
+  balas_pesan_id BIGINT UNSIGNED NULL, balas_at DATETIME NULL,
+  via ENUM('web','hp','riwayat') NULL, web_user_id INT NULL, web_user_nama VARCHAR(120) NULL,
+  detik_kerja INT UNSIGNED NULL, detik_total INT UNSIGNED NULL,
+  dihitung_at DATETIME NOT NULL,
+  UNIQUE KEY u_giliran (chat_id, masuk_pesan_id), KEY k_masuk (masuk_at), KEY k_nomor (nomor_id, masuk_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

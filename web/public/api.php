@@ -2,6 +2,7 @@
 /* Inbox Affiliate — API JSON. Semua aksi wajib login (hanya user di IZIN_USER_ID); aksi tulis wajib header X-CSRF.
    Kirim/edit/hapus/reaksi/tandai dibaca TIDAK langsung ke WhatsApp: masuk antrean_kirim (diproses server WA maks 1 per 2 detik per nomor). */
 require __DIR__ . '/../inc/boot.php';
+require __DIR__ . '/../inc/balas.php';   // [10 Nov] waktu balas
 $u = wajib_login_api();
 $aksi = (string)($_GET['aksi'] ?? '');
 $post = $_SERVER['REQUEST_METHOD'] === 'POST';
@@ -55,14 +56,16 @@ case 'chats':
     if ($sebelum !== '') { $w[] = 'c.pesan_terakhir_at < ?'; $p[] = $sebelum; }
     $belum = !empty($_GET['belum']);   // [28 Okt] filter: pesan terakhir dari kontak & belum ada balasan tim sesudahnya
     if ($belum) $w[] = 'c.belum_dibalas_sejak IS NOT NULL';
+    $tunggu = ($_GET['urut'] ?? '') === 'tunggu';   // [10 Nov] "Paling lama menunggu": hanya yang belum dibalas, menunggu paling lama di atas
+    if ($tunggu) { $w[] = 'c.belum_dibalas_sejak IS NOT NULL'; $w[] = "c.jenis = 'pribadi'"; }
     if ($cari !== '') { $angka = preg_replace('/\D/', '', $cari); $l = '%' . $cari . '%';   // nama tersimpan, pushName, nama bisnis, judul grup, nomor
         $w[] = '(c.judul LIKE ? OR k.nama LIKE ? OR k.nama_simpan LIKE ? OR k.push_name LIKE ? OR k.nama_bisnis LIKE ?' . ($angka !== '' ? ' OR c.jid LIKE ? OR c.pn LIKE ?' : '') . ')';
         array_push($p, $l, $l, $l, $l, $l); if ($angka !== '') array_push($p, '%' . $angka . '%', '%' . $angka . '%'); }
     $r = q('SELECT c.id, c.nomor_id, n.label nomor_label, c.jid, c.jenis, ' . NAMA_KOLOM . ', c.cuplikan, c.cuplikan_dari_tim, c.pesan_terakhir_at, c.belum_dibalas_sejak, c.waktu_balas_rata_detik,
               IF(c.belum_dibalas_sejak IS NULL, 0, (SELECT COUNT(*) FROM pesan x WHERE x.chat_id = c.id AND x.dari_tim = 0 AND x.waktu >= c.belum_dibalas_sejak)) belum_dibalas
             FROM chat c JOIN nomor n ON n.id = c.nomor_id LEFT JOIN kontak k ON k.nomor_id = c.nomor_id AND k.jid = c.jid
-            WHERE ' . implode(' AND ', $w) . ' ORDER BY c.pesan_terakhir_at DESC LIMIT ' . ($belum ? 300 : 60), $p)->fetchAll();
-    json_out(['ok' => true, 'chats' => $r]);
+            WHERE ' . implode(' AND ', $w) . ' ORDER BY ' . ($tunggu ? 'c.belum_dibalas_sejak ASC' : 'c.pesan_terakhir_at DESC') . ' LIMIT ' . ($belum || $tunggu ? 300 : 60), $p)->fetchAll();
+    json_out(['ok' => true, 'chats' => $r, 'sekarang' => time()]);
 
 case 'pesan':   // isi 1 chat (terbaru dulu, halaman per 60), lengkap: media, kutipan, reaksi, status, versi, tanda dari web
     $chat = $int('chat'); $c = chat_info($chat); $sebelum = $int('sebelum_id');
@@ -182,6 +185,51 @@ case 'ringkasan':
     $sampai = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$in('sampai')) ? $in('sampai') : date('Y-m-d');
     $r = q('SELECT r.*, n.label FROM ringkasan_harian r JOIN nomor n ON n.id = r.nomor_id WHERE r.tanggal BETWEEN ? AND ? ORDER BY r.tanggal DESC, r.nomor_id', [$dari, $sampai])->fetchAll();
     json_out(['ok' => true, 'dari' => $dari, 'sampai' => $sampai, 'baris' => $r]);
+// [10 Nov] Waktu Balas: per orang (user web yang membalas; balasan dari HP = "dari HP – <nomor>"), per nomor, 20 chat terlama dibalas.
+// Waktu balas = jam balasan tim pertama − jam pesan kontak pertama yang belum dibalas, hanya jam kerja (Sen-Jum 08-17, Sab 08-12).
+// Rentang menurut jam pesan masuk. Sumber: tabel balasan (cli/hitung-balas.php, tiap menit).
+case 'waktu_balas':
+    $rentang = in_array($in('rentang'), ['hari', '7', 'bulan'], true) ? $in('rentang') : 'hari';
+    $dari = $rentang === 'hari' ? date('Y-m-d 00:00:00') : ($rentang === '7' ? date('Y-m-d 00:00:00', strtotime('-6 day')) : date('Y-m-01 00:00:00'));
+    $sekarang = time();
+    $nomor = []; foreach (q('SELECT id, label, jid FROM nomor')->fetchAll() as $n) $nomor[(int)$n['id']] = $n;
+    $nama_nomor = function (int $id) use ($nomor) { $n = $nomor[$id] ?? null; if (!$n) return 'Nomor ' . $id; $l = trim((string)$n['label']) ?: 'Aff ' . $id;
+        $no = preg_replace('/\D/', '', explode('@', (string)$n['jid'])[0]); return $l . ($no !== '' ? ' …' . substr($no, -4) : ''); };
+    $r = q('SELECT b.*, UNIX_TIMESTAMP(b.masuk_at) tm, UNIX_TIMESTAMP(b.balas_at) tb, ' . NAMA_KOLOM . ', c.jid
+            FROM balasan b JOIN chat c ON c.id = b.chat_id LEFT JOIN kontak k ON k.nomor_id = c.nomor_id AND k.jid = c.jid
+            WHERE b.masuk_at >= ? ORDER BY b.masuk_at', [$dari])->fetchAll();
+    $stat = function (array $d) { sort($d); $n = count($d); if (!$n) return ['dibalas' => 0, 'rata' => null, 'median' => null, 'terlama' => null, 'lebih30' => 0, 'lebih2j' => 0];
+        return ['dibalas' => $n, 'rata' => (int)round(array_sum($d) / $n), 'median' => (int)($n % 2 ? $d[intdiv($n, 2)] : round(($d[$n / 2 - 1] + $d[$n / 2]) / 2)), 'terlama' => (int)end($d),
+                'lebih30' => count(array_filter($d, fn($x) => $x > 1800)), 'lebih2j' => count(array_filter($d, fn($x) => $x > 7200))]; };
+    $orang = []; $per_nomor = []; $semua = []; $hp_total = 0; $terlama = [];
+    foreach ($r as $b) {
+        $nid = (int)$b['nomor_id'];
+        $per_nomor[$nid] ??= ['nomor_id' => $nid, 'nama' => $nama_nomor($nid), 'giliran' => 0, 'd' => [], 'hp' => 0, 'belum' => 0, 'tunggu_terlama' => null];
+        $pn = &$per_nomor[$nid]; $pn['giliran']++;
+        if ($b['balas_at'] === null) { $pn['belum']++; $t = detik_kerja((int)$b['tm'], $sekarang); if ($pn['tunggu_terlama'] === null || $t > $pn['tunggu_terlama']) $pn['tunggu_terlama'] = $t; unset($pn); continue; }
+        $d = (int)$b['detik_kerja']; $pn['d'][] = $d; $semua[] = $d;
+        $web = $b['via'] === 'web';
+        if (!$web) { $pn['hp']++; $hp_total++; }
+        $kunci = $web ? 'u' . (int)$b['web_user_id'] : 'hp' . $nid;
+        $orang[$kunci] ??= ['nama' => $web ? ($b['web_user_nama'] ?: 'User #' . $b['web_user_id']) : 'dari HP – ' . $nama_nomor($nid), 'lewat' => $web ? 'web' : 'hp', 'd' => [], 'riwayat' => 0];
+        $orang[$kunci]['d'][] = $d; if ($b['via'] === 'riwayat') $orang[$kunci]['riwayat']++;
+        $terlama[] = ['kontak' => $b['nama'] ?: ($b['nomor'] ? '+' . $b['nomor'] : 'Nomor tersembunyi'), 'kontak_no' => $b['nomor'] ? '+' . $b['nomor'] : '', 'nomor' => $nama_nomor($nid),
+                      'chat_id' => (int)$b['chat_id'], 'masuk' => $b['masuk_at'], 'balas' => $b['balas_at'], 'detik' => $d, 'detik_total' => (int)$b['detik_total'],
+                      'oleh' => $web ? ($b['web_user_nama'] ?: 'User #' . $b['web_user_id']) : 'dari HP – ' . $nama_nomor($nid), 'lewat' => $b['via']];
+        unset($pn);
+    }
+    $orang = array_values(array_map(fn($o) => ['nama' => $o['nama'], 'lewat' => $o['lewat'], 'riwayat' => $o['riwayat']] + $stat($o['d']), $orang));
+    usort($orang, fn($a, $b) => [$b['rata'], $b['terlama']] <=> [$a['rata'], $a['terlama']]);
+    ksort($per_nomor);
+    $per_nomor = array_values(array_map(function ($n) use ($stat) { $s = $stat($n['d']); return ['nomor_id' => $n['nomor_id'], 'nama' => $n['nama'], 'giliran' => $n['giliran'], 'belum' => $n['belum'],
+        'tunggu_terlama' => $n['tunggu_terlama'], 'persen_hp' => $s['dibalas'] ? round(100 * $n['hp'] / $s['dibalas'], 1) : null] + $s; }, $per_nomor));
+    usort($terlama, fn($a, $b) => $b['detik'] <=> $a['detik']);
+    $total = $stat($semua);
+    json_out(['ok' => true, 'rentang' => $rentang, 'dari' => $dari, 'sampai' => date('Y-m-d H:i:s', $sekarang),
+              'total' => $total + ['giliran' => count($r), 'belum' => count($r) - $total['dibalas'], 'lewat_hp' => $hp_total, 'persen_hp' => $total['dibalas'] ? round(100 * $hp_total / $total['dibalas'], 1) : null],
+              'orang' => $orang, 'nomor' => $per_nomor, 'terlama' => array_slice($terlama, 0, 20),
+              'dihitung_at' => q('SELECT MAX(dihitung_at) FROM balasan')->fetchColumn()]);
+
 case 'audit':
     $r = q('SELECT a.*, n.label nomor_label FROM audit_web a LEFT JOIN nomor n ON n.id = a.nomor_id ORDER BY a.id DESC LIMIT 200')->fetchAll();
     $l = q('SELECT * FROM akses_log ORDER BY id DESC LIMIT 200')->fetchAll();

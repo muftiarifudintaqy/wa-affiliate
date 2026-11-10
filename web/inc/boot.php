@@ -4,10 +4,13 @@ declare(strict_types=1);
 date_default_timezone_set('Asia/Jakarta');
 
 // tidak boleh diindeks mesin pencari, tidak boleh dibingkai situs lain
+// [10 Nov] CLI (cli/hitung-balas.php): tanpa header & tanpa sesi — cukup konfigurasi + DB
+if (PHP_SAPI !== 'cli') {
 header('X-Robots-Tag: noindex, nofollow, noarchive, nosnippet');
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: no-referrer');
+}
 
 function env(): array {
     static $e = null;
@@ -34,6 +37,7 @@ function ua(): string { return substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''
 
 // ---- sesi: folder sendiri, cookie aman, habis setelah 8 jam tidak aktif
 const IDLE_DETIK = 8 * 3600;
+if (PHP_SAPI !== 'cli') {
 session_save_path((env()['DATA_DIR'] ?? '/var/lib/wa-affiliate') . '/php-sesi');
 ini_set('session.gc_maxlifetime', (string)IDLE_DETIK);
 ini_set('session.use_strict_mode', '1');
@@ -43,6 +47,7 @@ session_start();
 if (!empty($_SESSION['uid']) && (time() - (int)($_SESSION['aktif'] ?? 0)) > IDLE_DETIK) { $_SESSION = []; session_destroy(); session_start(); }
 if (!empty($_SESSION['uid'])) $_SESSION['aktif'] = time();
 if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(24));
+}
 
 function user(): ?array { return !empty($_SESSION['uid']) && in_array((int)$_SESSION['uid'], izin_user(), true) ? ['id' => (int)$_SESSION['uid'], 'nama' => (string)$_SESSION['nama']] : null; }
 function catat_akses(string $aksi, ?int $nomor = null, ?int $chat = null, ?string $ket = null): void {
