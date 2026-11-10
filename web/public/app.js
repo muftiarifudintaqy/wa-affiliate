@@ -40,12 +40,23 @@
     if (form) { opsi.method = 'POST'; opsi.body = form; }
     else if (p && p.__post) { opsi.method = 'POST'; const f = new FormData(); Object.keys(p).forEach(k => k !== '__post' && f.append(k, p[k])); opsi.body = f; }
     else if (p) url += '&' + new URLSearchParams(p).toString();
-    const r = await fetch(url, opsi);
+    let r;
+    try { r = await fetch(url, opsi); } catch (e) { offline(true); return { ok: false, offline: true, pesan: 'Tidak ada koneksi' }; }   // [10 Nov] PWA: jaringan putus
     const j = await r.json().catch(() => ({ ok: false, pesan: 'Server tidak menjawab' }));
+    offline(!!j.offline);
     if (j.login) { location.href = '/'; throw new Error('sesi habis'); }
     if (j.csrf) CSRF = j.csrf;
     return j;
   }
+  // [10 Nov] PWA: penanda "Tidak ada koneksi" (data terakhir tetap tampil, otomatis coba lagi)
+  function offline(ya) {
+    let b = $('#offline');
+    if (!ya) { if (b) b.hidden = true; return; }
+    if (!b) { b = document.createElement('div'); b.id = 'offline'; b.className = 'offline'; b.setAttribute('role', 'status'); b.textContent = 'Tidak ada koneksi — mencoba lagi otomatis'; document.body.appendChild(b); }
+    b.hidden = false;
+  }
+  addEventListener('offline', () => offline(true));
+  addEventListener('online', () => { offline(false); S.jejakChats = ''; muatChats(); });
   async function antre(aksi, p, form) {
     const j = await api(aksi, p, form);
     if (!j.ok) { toast(j.pesan || 'Gagal'); return null; }
@@ -512,6 +523,29 @@
   // ---------------------------------------------------------------- jalan
   if (app.dataset.pesan) toast(app.dataset.pesan);
   muatNomor().then(muatChats);
+  if (LIHAT) gantiHal('waktu');   // [10 Nov] akun lihat (owner): langsung ke Waktu Balas
+
+  // ---------------------------------------------------------------- [10 Nov] petunjuk pasang ke layar utama (sekali, bisa ditutup)
+  // iPhone/iPad: Safari & Chrome (iOS 16.4+) sama-sama lewat Bagikan → Tambahkan ke Layar Utama. Android/Chrome desktop: tombol Pasang (beforeinstallprompt).
+  (function () {
+    const terpasang = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    let tutup = false; try { tutup = localStorage.getItem('pwa_petunjuk') === 'tutup'; } catch (e) {}
+    if (terpasang || tutup) return;
+    const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const chromeIos = /CriOS/.test(navigator.userAgent);
+    const IKON_BAGI = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg>';
+    function tampil(isi, pasang) {
+      const d = document.createElement('div'); d.className = 'pasang'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-label', 'Pasang aplikasi');
+      d.innerHTML = `<img src="/img/apple-touch-icon.png" alt=""><div class="pasang-teks"><b>Pasang Affiliate di layar utama</b><span>${isi}</span></div>${pasang ? '<button type="button" class="btn" data-pasang>Pasang</button>' : ''}<button type="button" class="pasang-tutup" aria-label="Tutup petunjuk">✕</button>`;
+      document.body.appendChild(d);
+      const simpan = () => { try { localStorage.setItem('pwa_petunjuk', 'tutup'); } catch (e) {} d.remove(); };
+      d.querySelector('.pasang-tutup').addEventListener('click', simpan);
+      if (pasang) d.querySelector('[data-pasang]').addEventListener('click', async () => { pasang.prompt(); try { await pasang.userChoice; } catch (e) {} simpan(); });
+    }
+    if (ios) tampil(`Tap <b class="pasang-ikon">${IKON_BAGI} Bagikan</b>${chromeIos ? ' (kanan atas)' : ''} → <b>Tambahkan ke Layar Utama</b>.`);
+    else addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); tampil('Buka seperti aplikasi, tanpa bilah browser.', e); });
+    addEventListener('appinstalled', () => { try { localStorage.setItem('pwa_petunjuk', 'tutup'); } catch (e) {} const d = $('.pasang'); if (d) d.remove(); });
+  })();
   setInterval(() => { if (!document.hidden && S.hal === 'inbox') { muatChats(); if (S.chat) muatPesan(); } }, 3000);
   setInterval(() => { if (!document.hidden) muatNomor(); }, S.hal === 'hubungkan' ? 3000 : 8000);
   setInterval(() => { if (!document.hidden && S.hal === 'hubungkan') muatNomor(); }, 3000);

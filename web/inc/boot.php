@@ -35,17 +35,24 @@ function izin_user(): array { return array_values(array_filter(array_map('intval
 function ip(): string { return substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45); }
 function ua(): string { return substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255); }
 
-// ---- sesi: folder sendiri, cookie aman, habis setelah 8 jam tidak aktif
-const IDLE_DETIK = 8 * 3600;
+// ---- sesi: folder sendiri, cookie aman (HttpOnly, Secure, SameSite=Lax)
+// [10 Nov] PWA di layar utama: login bertahan 30 hari sejak terakhir dipakai (dulu 8 jam tidak aktif); cookie diperpanjang maks 1x/hari
+const IDLE_DETIK = 30 * 86400;
 if (PHP_SAPI !== 'cli') {
 session_save_path((env()['DATA_DIR'] ?? '/var/lib/wa-affiliate') . '/php-sesi');
 ini_set('session.gc_maxlifetime', (string)IDLE_DETIK);
 ini_set('session.use_strict_mode', '1');
 session_name('WAAFF');
-session_set_cookie_params(['lifetime' => 0, 'path' => '/', 'secure' => true, 'httponly' => true, 'samesite' => 'Lax']);
+session_set_cookie_params(['lifetime' => IDLE_DETIK, 'path' => '/', 'secure' => true, 'httponly' => true, 'samesite' => 'Lax']);
 session_start();
 if (!empty($_SESSION['uid']) && (time() - (int)($_SESSION['aktif'] ?? 0)) > IDLE_DETIK) { $_SESSION = []; session_destroy(); session_start(); }
-if (!empty($_SESSION['uid'])) $_SESSION['aktif'] = time();
+if (!empty($_SESSION['uid'])) {
+    $_SESSION['aktif'] = time();
+    if (time() - (int)($_SESSION['cookie_at'] ?? 0) > 86400) {
+        setcookie(session_name(), session_id(), ['expires' => time() + IDLE_DETIK, 'path' => '/', 'secure' => true, 'httponly' => true, 'samesite' => 'Lax']);
+        $_SESSION['cookie_at'] = time();
+    }
+}
 if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(24));
 }
 

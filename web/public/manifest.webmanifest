@@ -1,0 +1,19 @@
+{
+  "name": "Affiliate Prepare",
+  "short_name": "Affiliate",
+  "description": "Inbox WhatsApp tim affiliate Prepare",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#4A55A2",
+  "theme_color": "#4A55A2",
+  "lang": "id",
+  "icons": [
+    { "src": "/img/ikon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/img/ikon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/img/ikon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/img/ikon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
