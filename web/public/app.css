@@ -304,3 +304,6 @@ table.tb{border-collapse:collapse;width:100%;background:#fff;border-radius:var(-
 .tb-w td:first-child,.tb-w th:first-child{position:sticky;left:0;z-index:1;background:#fff;min-width:150px}.tb-w th:first-child{background:var(--aksen-muda)}
 .tb-w td{white-space:nowrap}.tb-w td:first-child{white-space:normal}
 @media (max-width:420px){.w-kartu.hp{grid-column:1/-1}.w-kartu b{font-size:19px}}
+/* [10 Nov] akun lihat saja: penanda netral (bukan merah) & tautan keluar di layar ganti sandi */
+.banner-putus.lihat{background:var(--aksen-muda);color:var(--gelap);border-bottom-color:var(--aksen)}
+.masuk-keluar{justify-self:center;font-size:13px;color:var(--redup);padding:6px 10px}

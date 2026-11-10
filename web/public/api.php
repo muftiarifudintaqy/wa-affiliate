@@ -7,6 +7,10 @@ $u = wajib_login_api();
 $aksi = (string)($_GET['aksi'] ?? '');
 $post = $_SERVER['REQUEST_METHOD'] === 'POST';
 if ($post) wajib_csrf();
+// [10 Nov] akun LIHAT SAJA: hanya baca chat, Ringkasan harian & Waktu Balas. Kirim/edit/hapus/reaksi/tandai dibaca, Hubungkan (QR, lepas, label, grup)
+// & Audit ditolak di server (bukan hanya disembunyikan di tampilan).
+const AKSI_LIHAT = ['nomor', 'chats', 'pesan', 'cari', 'versi', 'ringkasan', 'waktu_balas'];
+if ($u['peran'] !== 'penuh' && !in_array($aksi, AKSI_LIHAT, true)) json_out(['ok' => false, 'pesan' => 'Akun ini hanya untuk melihat.'], 403);
 $in = fn(string $k, $d = null) => $_POST[$k] ?? $_GET[$k] ?? $d;
 $int = fn(string $k) => (int)$in($k, 0);
 const MAKS_UNGGAH = 64 * 1024 * 1024;
@@ -47,6 +51,7 @@ case 'nomor':   // status 6 nomor + laporan riwayat (pesan paling lama & jumlah 
               (SELECT COUNT(*) FROM chat c WHERE c.nomor_id = n.id AND c.jenis = 'pribadi') jumlah_chat,
               (SELECT COUNT(*) FROM media m JOIN pesan p ON p.id = m.pesan_id WHERE p.nomor_id = n.id AND m.status = 'antre') media_antre
             FROM nomor n WHERE n.aktif = 1 ORDER BY n.id")->fetchAll();
+    if ($u['peran'] !== 'penuh') foreach ($r as &$x) { $x['qr'] = null; $x['qr_at'] = null; } unset($x);   // QR = kunci menautkan perangkat: tidak untuk akun lihat
     json_out(['ok' => true, 'nomor' => $r, 'csrf' => $_SESSION['csrf']]);
 
 case 'chats':

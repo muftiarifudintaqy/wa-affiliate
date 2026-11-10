@@ -4,6 +4,8 @@
   const $ = (s, r) => (r || document).querySelector(s), $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const app = $('#app'); if (!app) return;
   let CSRF = app.dataset.csrf;
+  // [10 Nov] akun LIHAT SAJA: baca chat, Ringkasan & Waktu Balas; tanpa kolom tulis, menu aksi pesan, Hubungkan & Audit (server juga menolak)
+  const LIHAT = app.dataset.peran !== 'penuh';
   const S = { nomor: [], nomorAktif: 'semua', chats: [], chat: null, pesan: [], kutip: null, hal: 'inbox', jejak: '', palingLama: 0 };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
@@ -199,10 +201,12 @@
     if (!j.ok || !S.chat || S.chat.id !== id) return;
     S.chat = j.chat;
     const kc = keadaan({ status: j.chat.nomor_status, jid: j.chat.nomor_jid, qr: Number(j.chat.nomor_qr) });
-    S.bisaBalas = kc === 'terhubung';
+    S.bisaBalas = kc === 'terhubung' && !LIHAT;
     $('#tulis').hidden = !S.bisaBalas; $('#btnDibaca').hidden = !S.bisaBalas;
     const ban = $('#bannerPutus'); ban.hidden = S.bisaBalas;
-    if (!S.bisaBalas) ban.innerHTML = `${IKON_PUTUS}<span>${kc === 'perlu_scan' || kc === 'menghubungkan' ? '<b>Nomor ini sedang menyambung</b> — balas setelah QR dipindai &amp; tersambung.' : '<b>Nomor ini sedang terputus</b> — scan ulang untuk balas.'} Chat &amp; foto tetap bisa dibaca.</span><button type="button" class="btn" data-ke-hubungkan>Scan ulang</button>`;
+    ban.classList.toggle('lihat', LIHAT);
+    if (LIHAT) ban.innerHTML = `<span><b>Akun lihat saja</b> — bisa membaca chat, tidak bisa membalas atau mengubah apa pun.</span>`;
+    else if (!S.bisaBalas) ban.innerHTML = `${IKON_PUTUS}<span>${kc === 'perlu_scan' || kc === 'menghubungkan' ? '<b>Nomor ini sedang menyambung</b> — balas setelah QR dipindai &amp; tersambung.' : '<b>Nomor ini sedang terputus</b> — scan ulang untuk balas.'} Chat &amp; foto tetap bisa dibaca.</span><button type="button" class="btn" data-ke-hubungkan>Scan ulang</button>`;
     $('#namaChat').textContent = namaChat(j.chat); pasang($('#avaChat'), avaChat(j.chat)); $('#avaChat').classList.toggle('grup', j.chat.jenis === 'grup');
     pasang($('#infoChat'), `${esc(nomorChat(j.chat))}${j.chat.jenis !== 'grup' ? ` · Disimpan sebagai: <b>${esc(j.chat.nama_simpan || '–')}</b> · Nama WA: <b>${esc(j.chat.push_name || '–')}</b>` : ''} · <span class="tag-n">${esc(namaNomorId(j.chat.nomor_id, j.chat.nomor_label))}</span> · rata-rata balas ${durasi(j.chat.waktu_balas_rata_detik)}${j.chat.belum_dibalas_sejak ? ` · <b style="color:var(--oranye)">belum dibalas sejak ${esc(j.chat.belum_dibalas_sejak.slice(0, 16))}</b>` : ''}`);
     const jejak = String(S.bisaBalas) + JSON.stringify(j.pesan.map(p => [p.id, p.status, p.teks, p.dihapus_semua_at, p.reaksi, p.media_status, p.jumlah_versi]));
@@ -275,9 +279,9 @@
     const umur = (Date.now() - new Date(p.waktu.replace(' ', 'T') + '+07:00').getTime()) / 1000;
     const bisaEdit = p.dari_tim == 1 && p.jenis === 'teks' && !p.dihapus_semua_at && umur <= 900;
     const bisaHapusSemua = p.dari_tim == 1 && !p.dihapus_semua_at && umur <= 2 * 86400;
-    const baca = S.bisaBalas === false, mati = 'disabled title="Nomor terputus — scan ulang untuk balas"';   // mode baca: hanya salin, versi, info
+    const baca = S.bisaBalas === false, mati = LIHAT ? 'hidden' : 'disabled title="Nomor terputus — scan ulang untuk balas"';   // mode baca: hanya salin, versi, info (akun lihat: tombol aksi tidak ditampilkan)
     const m = document.createElement('div'); m.className = 'menu';
-    m.innerHTML = `${baca ? '<div class="menu-catatan">Mode baca — nomor terputus</div>' : `<div class="emo">${['👍', '❤️', '😂', '😮', '😢', '🙏'].map(x => `<button data-r="${x}">${x}</button>`).join('')}<button data-r="" title="Hapus reaksi">✕</button></div>`}
+    m.innerHTML = `${baca ? `<div class="menu-catatan">${LIHAT ? 'Akun lihat saja' : 'Mode baca — nomor terputus'}</div>` : `<div class="emo">${['👍', '❤️', '😂', '😮', '😢', '🙏'].map(x => `<button data-r="${x}">${x}</button>`).join('')}<button data-r="" title="Hapus reaksi">✕</button></div>`}
       <button data-a="balas" ${baca ? mati : ''}>Balas</button>
       ${p.teks ? '<button data-a="salin">Salin teks</button>' : ''}
       <button data-a="edit" ${baca ? mati : bisaEdit ? '' : 'disabled title="Hanya pesan teks tim, maks 15 menit"'}>Edit</button>
@@ -506,6 +510,7 @@
   }
 
   // ---------------------------------------------------------------- jalan
+  if (app.dataset.pesan) toast(app.dataset.pesan);
   muatNomor().then(muatChats);
   setInterval(() => { if (!document.hidden && S.hal === 'inbox') { muatChats(); if (S.chat) muatPesan(); } }, 3000);
   setInterval(() => { if (!document.hidden) muatNomor(); }, S.hal === 'hubungkan' ? 3000 : 8000);

@@ -7,6 +7,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['nama'])) {
     if (!hash_equals((string)$_SESSION['csrf'], (string)($_POST['csrf'] ?? ''))) $galat = 'Halaman kedaluwarsa, coba lagi.';
     else { $galat = coba_login(trim((string)$_POST['nama']), (string)($_POST['sandi'] ?? '')); if ($galat === '') { header('Location: /'); exit; } }
 }
+// [10 Nov] akun lihat saja: wajib ganti kata sandi saat login pertama (sebelum itu aplikasi & API tertutup)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['sandi_baru']) && user()) {
+    if (!hash_equals((string)$_SESSION['csrf'], (string)($_POST['csrf'] ?? ''))) $galat = 'Halaman kedaluwarsa, coba lagi.';
+    else { $galat = ganti_sandi((string)($_POST['sandi_lama'] ?? ''), (string)$_POST['sandi_baru'], (string)($_POST['sandi_ulang'] ?? '')); if ($galat === '') { header('Location: /?sandi=ok'); exit; } }
+}
 $u = user();
 if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; catat_akses('buka_inbox'); }
 ?><!doctype html>
@@ -17,7 +22,7 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
 <link rel="icon" href="/img/prepare-bulat.png"><meta name="theme-color" content="#4A55A2">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/app.css?v=15">
+<link rel="stylesheet" href="/app.css?v=16">
 </head><body>
 <?php if (!$u): ?>
 <main class="masuk"><span class="masuk-cahaya" aria-hidden="true"></span>
@@ -32,8 +37,23 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
     <button type="submit">Masuk</button>
   </form>
 </main>
-<?php else: ?>
-<div id="app" class="app" data-csrf="<?= e($_SESSION['csrf']) ?>" data-user="<?= e($u['nama']) ?>">
+<?php elseif ($u['wajib_ganti']): ?>
+<main class="masuk"><span class="masuk-cahaya" aria-hidden="true"></span>
+  <form method="post" class="masuk-kartu" autocomplete="off">
+    <img class="masuk-logo" src="/img/prepare.png" alt="Prepare">
+    <h1>Ganti kata sandi</h1>
+    <p class="masuk-sub">Halo <?= e($u['nama']) ?>, ini login pertama. Buat kata sandi baru dulu (minimal 8 karakter).</p>
+    <?php if ($galat): ?><p class="masuk-galat" role="alert"><?= e($galat) ?></p><?php endif; ?>
+    <label>Kata sandi sekarang<input name="sandi_lama" type="password" required autocomplete="current-password"></label>
+    <label>Kata sandi baru<input name="sandi_baru" type="password" required minlength="8" autocomplete="new-password"></label>
+    <label>Ulangi kata sandi baru<input name="sandi_ulang" type="password" required minlength="8" autocomplete="new-password"></label>
+    <input type="hidden" name="csrf" value="<?= e($_SESSION['csrf']) ?>">
+    <button type="submit">Simpan &amp; masuk</button>
+    <a class="masuk-keluar" href="/?keluar=1">Keluar</a>
+  </form>
+</main>
+<?php else: $lihat = $u['peran'] !== 'penuh'; ?>
+<div id="app" class="app" data-csrf="<?= e($_SESSION['csrf']) ?>" data-user="<?= e($u['nama']) ?>" data-peran="<?= e($u['peran']) ?>"<?= ($_GET['sandi'] ?? '') === 'ok' ? ' data-pesan="Kata sandi baru tersimpan"' : '' ?>>
   <nav class="rel" aria-label="Nomor">
     <img class="rel-logo" src="/img/prepare-bulat.png" alt="Prepare">
     <div id="relNomor" class="rel-nomor"></div>
@@ -43,8 +63,10 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
       <button data-hal="inbox" class="rel-btn on" title="Inbox" aria-label="Inbox"><?= $ikon('<path d="M21 12a8.5 8.5 0 0 1-12.6 7.4L3 21l1.6-5.1A8.5 8.5 0 1 1 21 12z"/>') ?></button>
       <button data-hal="waktu" class="rel-btn" title="Waktu balas" aria-label="Waktu balas"><?= $ikon('<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2M9.5 2.5h5M12 2.5V6"/>') ?></button>
       <button data-hal="ringkasan" class="rel-btn" title="Ringkasan harian" aria-label="Ringkasan harian"><?= $ikon('<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>') ?></button>
+      <?php if (!$lihat): /* [10 Nov] akun lihat saja: tanpa Hubungkan (QR) & Audit */ ?>
       <button data-hal="hubungkan" class="rel-btn" title="Hubungkan nomor" aria-label="Hubungkan nomor"><?= $ikon('<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4L12 5.6"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>') ?></button>
       <button data-hal="audit" class="rel-btn" title="Audit" aria-label="Audit"><?= $ikon('<path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>') ?></button>
+      <?php endif; ?>
       <a href="/?keluar=1" class="rel-btn" title="Keluar (<?= e($u['nama']) ?>)" aria-label="Keluar"><?= $ikon('<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H3"/>') ?></a>
     </div>
   </nav>
@@ -91,6 +113,6 @@ if ($u && empty($_SESSION['inbox_dicatat'])) { $_SESSION['inbox_dicatat'] = 1; c
 <div class="modal" id="modal" hidden><div class="modal-kartu"><button class="modal-tutup" id="modalTutup" aria-label="Tutup">✕</button><div id="modalIsi"></div></div></div>
 <div class="toast" id="toast" role="status" hidden></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="/app.js?v=11"></script>
+<script src="/app.js?v=12"></script>
 <?php endif; ?>
 </body></html>

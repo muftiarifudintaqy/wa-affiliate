@@ -174,3 +174,13 @@ CREATE TABLE IF NOT EXISTS balasan (
   dihitung_at DATETIME NOT NULL,
   UNIQUE KEY u_giliran (chat_id, masuk_pesan_id), KEY k_masuk (masuk_at), KEY k_nomor (nomor_id, masuk_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- [10 Nov] akun LIHAT SAJA (bukan akun ERP), mis. owner: hanya baca chat, Ringkasan harian & Waktu Balas. Sandi disimpan sebagai hash (password_hash),
+-- wajib diganti saat login pertama. Kelola lewat web/cli/akun-lihat.php (sandi dibaca dari stdin, tidak pernah tercetak).
+CREATE TABLE IF NOT EXISTS akun_lihat (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(60) NOT NULL, nama VARCHAR(120) NOT NULL,
+  sandi_hash VARCHAR(255) NOT NULL, wajib_ganti TINYINT(1) NOT NULL DEFAULT 1, aktif TINYINT(1) NOT NULL DEFAULT 1,
+  dibuat_at DATETIME NOT NULL, sandi_diganti_at DATETIME NULL, login_terakhir DATETIME NULL,
+  UNIQUE KEY u_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

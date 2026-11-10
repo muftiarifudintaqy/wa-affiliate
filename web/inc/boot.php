@@ -49,7 +49,22 @@ if (!empty($_SESSION['uid'])) $_SESSION['aktif'] = time();
 if (empty($_SESSION['csrf'])) $_SESSION['csrf'] = bin2hex(random_bytes(24));
 }
 
-function user(): ?array { return !empty($_SESSION['uid']) && in_array((int)$_SESSION['uid'], izin_user(), true) ? ['id' => (int)$_SESSION['uid'], 'nama' => (string)$_SESSION['nama']] : null; }
+/** User login: akun ERP di IZIN_USER_ID (peran 'penuh'), atau [10 Nov] akun lihat saja (tabel akun_lihat, uid negatif = -id, peran 'lihat').
+    Akun lihat dicek ulang ke DB tiap request: dinonaktifkan / wajib ganti sandi langsung berlaku. */
+function user(bool $segar = false): ?array {
+    static $u = false;
+    if ($segar) $u = false;
+    if ($u !== false) return $u;
+    $id = (int)($_SESSION['uid'] ?? 0);
+    if ($id > 0) return $u = in_array($id, izin_user(), true) ? ['id' => $id, 'nama' => (string)$_SESSION['nama'], 'peran' => 'penuh', 'wajib_ganti' => false] : null;
+    if ($id < 0) {
+        $a = q('SELECT id, nama, wajib_ganti FROM akun_lihat WHERE id = ? AND aktif = 1', [-$id])->fetch();
+        return $u = $a ? ['id' => $id, 'nama' => (string)$a['nama'], 'peran' => 'lihat', 'wajib_ganti' => (bool)$a['wajib_ganti']] : null;
+    }
+    return $u = null;
+}
+/** login & sudah tidak wajib ganti sandi (boleh pakai aplikasi) */
+function user_siap(): ?array { $u = user(); return $u && !$u['wajib_ganti'] ? $u : null; }
 function catat_akses(string $aksi, ?int $nomor = null, ?int $chat = null, ?string $ket = null): void {
     $u = user();
     q('INSERT INTO akses_log (user_id, nama, aksi, nomor_id, chat_id, keterangan, ip, user_agent, waktu) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())',
@@ -61,10 +76,24 @@ function catat_audit(string $aksi, ?int $nomor, ?int $chat, ?int $pesan, ?int $a
       [$u['id'], $u['nama'], $aksi, $nomor, $chat, $pesan, $antrean, $isi !== null ? mb_substr($isi, 0, 255) : null, $antrean ? 'menunggu' : 'berhasil', ip(), ua()]);
 }
 
-/** Login dengan akun ERP (password_verify; md5 lama seperti ERP). Hanya user di IZIN_USER_ID & status Aktif. Maks 5 gagal / 15 menit per IP. */
+/** Login dengan akun ERP (password_verify; md5 lama seperti ERP). Hanya user di IZIN_USER_ID & status Aktif. Maks 5 gagal / 15 menit per IP.
+    [10 Nov] Username yang ada di akun_lihat (akun lihat saja) dicek di sana, bukan di ERP. */
 function coba_login(string $nama, string $sandi): string {
     $gagal = (int)q("SELECT COUNT(*) FROM akses_log WHERE ip = ? AND aksi = 'login_gagal' AND waktu > NOW() - INTERVAL 15 MINUTE", [ip()])->fetchColumn();
     if ($gagal >= 5) return 'Terlalu banyak percobaan. Coba lagi 15 menit lagi.';
+    $a = q('SELECT id, nama, sandi_hash, aktif FROM akun_lihat WHERE username = ?', [$nama])->fetch();
+    if ($a) {
+        if (!$a['aktif'] || !password_verify($sandi, (string)$a['sandi_hash'])) {
+            q("INSERT INTO akses_log (user_id, nama, aksi, keterangan, ip, user_agent, waktu) VALUES (?, ?, 'login_gagal', ?, ?, ?, NOW())",
+              [-(int)$a['id'], $a['nama'], mb_substr('akun lihat: ' . $nama . ($a['aktif'] ? '' : ' (nonaktif)'), 0, 255), ip(), ua()]);
+            return 'Akun atau kata sandi salah, atau akun ini tidak punya akses.';
+        }
+        session_regenerate_id(true);
+        $_SESSION['uid'] = -(int)$a['id']; $_SESSION['nama'] = (string)$a['nama']; $_SESSION['aktif'] = time(); $_SESSION['csrf'] = bin2hex(random_bytes(24));
+        q('UPDATE akun_lihat SET login_terakhir = NOW() WHERE id = ?', [$a['id']]);
+        user(true); catat_akses('login', null, null, 'akun lihat saja');
+        return '';
+    }
     $erp = env()['ERP_DB'] ?? 'skinlyfe_erp';
     $u = q("SELECT id, full_name, password, status FROM `$erp`.user WHERE (username = ? OR email = ?) LIMIT 1", [$nama, $nama])->fetch();
     $ok = $u && (password_verify($sandi, (string)$u['password']) || hash_equals((string)$u['password'], md5($sandi)));
@@ -75,10 +104,27 @@ function coba_login(string $nama, string $sandi): string {
     }
     session_regenerate_id(true);
     $_SESSION['uid'] = (int)$u['id']; $_SESSION['nama'] = (string)$u['full_name']; $_SESSION['aktif'] = time(); $_SESSION['csrf'] = bin2hex(random_bytes(24));
-    catat_akses('login');
+    user(true); catat_akses('login');
     return '';
 }
 function json_out($x, int $kode = 200): void { http_response_code($kode); header('Content-Type: application/json; charset=utf-8'); header('Cache-Control: no-store'); echo json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); exit; }
-function wajib_login_api(): array { $u = user(); if (!$u) json_out(['ok' => false, 'pesan' => 'Sesi habis, silakan masuk lagi.', 'login' => true], 401); return $u; }
+function wajib_login_api(): array {
+    $u = user(); if (!$u) json_out(['ok' => false, 'pesan' => 'Sesi habis, silakan masuk lagi.', 'login' => true], 401);
+    if ($u['wajib_ganti']) json_out(['ok' => false, 'pesan' => 'Ganti kata sandi dulu.', 'login' => true], 403);   // [10 Nov] login pertama akun lihat
+    return $u;
+}
+/** [10 Nov] Ganti sandi akun lihat saja. Return '' kalau berhasil, selain itu pesan galat. */
+function ganti_sandi(string $lama, string $baru, string $ulang): string {
+    $u = user(); if (!$u || $u['peran'] !== 'lihat') return 'Akun ini tidak memakai kata sandi lokal.';
+    $a = q('SELECT sandi_hash FROM akun_lihat WHERE id = ?', [-$u['id']])->fetch();
+    if (!$a || !password_verify($lama, (string)$a['sandi_hash'])) return 'Kata sandi lama salah.';
+    if (mb_strlen($baru) < 8) return 'Kata sandi baru minimal 8 karakter.';
+    if ($baru !== $ulang) return 'Ulangi kata sandi baru tidak sama.';
+    if (password_verify($baru, (string)$a['sandi_hash'])) return 'Kata sandi baru harus berbeda dari yang lama.';
+    q('UPDATE akun_lihat SET sandi_hash = ?, wajib_ganti = 0, sandi_diganti_at = NOW() WHERE id = ?', [password_hash($baru, PASSWORD_DEFAULT), -$u['id']]);
+    session_regenerate_id(true); $_SESSION['csrf'] = bin2hex(random_bytes(24));
+    user(true); catat_akses('ganti_sandi');
+    return '';
+}
 function wajib_csrf(): void { if (!hash_equals((string)$_SESSION['csrf'], (string)($_SERVER['HTTP_X_CSRF'] ?? ''))) json_out(['ok' => false, 'pesan' => 'Token tidak valid, muat ulang halaman.'], 403); }
 function e(?string $s): string { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }

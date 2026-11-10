@@ -1,7 +1,7 @@
 <?php
 /* Inbox Affiliate — media pesan (gambar, video, voice note, dokumen, stiker). Wajib login; file di luar folder web; dicatat. */
 require __DIR__ . '/../inc/boot.php';
-if (!user()) { http_response_code(401); exit('Silakan masuk.'); }
+if (!user_siap()) { http_response_code(401); exit('Silakan masuk.'); }   // [10 Nov] akun lihat yang belum ganti sandi belum boleh membuka media
 if (isset($_GET['profil'])) {   // foto profil WA nomor tim (kartu & sidebar)
     $n = q('SELECT foto_path FROM nomor WHERE id = ?', [(int)$_GET['profil']])->fetch();
     $akar = realpath((env()['DATA_DIR'] ?? '/var/lib/wa-affiliate') . '/media'); $f = $n && $n['foto_path'] ? realpath($akar . '/' . $n['foto_path']) : false;
